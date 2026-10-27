@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Restore v2: `vault restore --detach` runs a restore as a background job (`vault jobs`, `vault job --id`, progress and
+  result in `var/status/restore-<job>.json`); `--in-place --confirm <account>` restores files, a database or one mailbox
+  (`--mailbox user@domain`) into the live account after a fresh safety backup, with symlink and ownership guards.
+  The admin module restores through jobs with a progress bar, a "Restore into the live account" option, a mailbox picker
+  and a "Recent restores" table.
 - Immutable mode (S3 object lock): config keys `IMMUTABLE`, `LOCK_MODE`, `LOCK_DAYS`; `vault init` refuses a bucket
   without a matching default retention and merges a `cwp-vault-noncurrent` lifecycle rule; needs the `aws` CLI v2.
 - `vault recover (--account U | --all) [--before TIME] [--yes]`: removes the delete markers left by a wipe, then

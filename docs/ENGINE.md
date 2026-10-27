@@ -79,7 +79,10 @@ Files: `/var/named/*.db`, `/etc/pki/tls/certs`, `/etc/pki/tls/private`, `/usr/lo
 vault init                       # create missing repos (accounts + _server); idempotent
 vault backup [--account U|--all] [--dry-run]
 vault restore --account U [--snapshot ID|latest] --what files|db|mail|meta [--path P] [--db NAME]
-              [--target DIR | --target-db NAME] [--dry-run]
+              [--mailbox user@domain] [--target DIR | --target-db NAME] [--dry-run] [--detach]
+vault restore --account U --snapshot ID --what files|db|mail --in-place --confirm U [--detach] ...
+vault jobs [--json]              # last 20 restore jobs
+vault job --id ID --json         # one restore job
 vault snapshots --account U      # list (JSON with --json)
 vault prune [--account U|--all]  # forget --keep-* --prune
 vault check [--account U|--all]  # check --read-data-subset
@@ -90,9 +93,8 @@ vault test-storage               # write → read → delete a probe snapshot in
 vault version
 ```
 
-Restore in v0.2 is CLI-only and **never writes over live data by default**: files restore to
-`--target` (required, must not be `/` or under `/home/<user>` unless `--in-place` is given);
-databases restore into `--target-db` (required; refuses an existing non-empty DB unless `--force`).
+Restore **never writes over live data by default**: files restore to `--target` (or a fresh private folder), databases
+into a new `--target-db`. Writing into the live account needs `--in-place` (see "Restore safety").
 
 ## Behaviour
 
@@ -134,8 +136,18 @@ Every read command supports `--json` and prints one JSON document to stdout; err
 | `vault test-storage --json` | `{"ok":bool,"write_ms","read_ms","delete_ms","error"}` |
 | `vault restore … --json` | `{"ok","job","target","files","bytes","duration_s","error"}`; also written to `var/status/restore-<job>.json` |
 
-Long-running verbs (`backup`, `restore`, `prune`, `check`) are started by the module detached:
-`setsid -f /usr/local/bin/vault <verb> … --quiet`; the module then polls `status --json` / `log --tail`.
+Long-running verbs (`backup`, `prune`, `check`) are started by the module detached:
+`setsid -f /usr/local/bin/vault <verb> ... --quiet`; the module then polls `status --json` / `log --tail`.
+
+**Restore jobs.** `vault restore ... --detach` validates the arguments, writes `var/status/restore-<job>.json`
+`{"job","state":"queued",...}`, re-executes itself detached (`setsid -f`, stdio on `/dev/null`) and prints `{"job":"<id>"}`.
+The job id is `<UTC time>-<account>` and must match `^[0-9]{8}T[0-9]{6}Z-[a-z][a-z0-9_]{0,31}$`. The worker (`restore ... --job ID`,
+internal) moves the file through `running` (with `percent` and `bytes_done` from `restic --json` status lines) to `done` or `failed`;
+the final file holds the usual result fields (`ok,job,target,files,bytes,duration_s,error`) plus `state,account,what,percent`, and for
+`--in-place` also `in_place:true` and `safety_snapshots:[ids]`. A worker that exits without a result is marked `failed`.
+`vault jobs --json` returns the last 20 job files (newest first) as an array; `vault job --id ID --json` returns one
+(exit 2 for a bad or unknown id). Without `--detach` the restore runs in the foreground and prints the result as before.
+A dry run never queues a job.
 
 ## Immutable mode (v0.3)
 
@@ -173,7 +185,22 @@ no-delete key / object-lock mode planned for v0.3 (object lock verified working 
 **Restore safety:**
 - Default target: a fresh `0700` root dir `/var/lib/cwp-vault/restore/<timestamp>-<account>`. A user-given
   `--target` must not exist or be empty, is resolved with `realpath`, and is refused if any path component is a
-  symlink or it lies under `/home`, `/etc`, `/root`, `/usr`, `/var/lib/mysql` or `/`. `--in-place` is not in v0.2.
+  symlink or it lies under `/home`, `/etc`, `/root`, `/usr`, `/var/lib/mysql` or `/`. 
+- **`--in-place`** (files, db, and mail with `--mailbox`; never meta): needs `--confirm <account>` equal to `--account`
+  and an explicit `--snapshot ID` (not `latest`, because the safety backup would become the newest snapshot), and takes no
+  `--target`/`--target-db`. Order: validate everything, then run a fresh `vault backup --account U` (a failure aborts, nothing is
+  restored) and record its snapshot ids as `safety_snapshots`, then restore.
+  - Files: restic restores into a private staging folder (setuid/setgid stripped), then
+    `runuser -u <user> -- rsync -a --no-specials --no-devices --safe-links <staging>/<path> <path>`, so the account's own
+    rights bound the copy. Every `--path` must be inside `/home/<user>` and no component from `/home/<user>` down may be a
+    symlink (refused with exit 2 before the safety backup). Nothing is deleted: files created since the snapshot stay.
+  - Database: only a database that exists now and belongs to the account (`<user>_...`); the DEFINER-stripped dump (which
+    drops and recreates each table) is piped into `mysql <db>` after the safety backup.
+  - Mail: `--what mail --mailbox user@domain` selects `/var/vmail/<domain>/<user>`. The local part is `[A-Za-z0-9][A-Za-z0-9._+-]{0,63}`,
+    the domain must be one of the account's domains. Without `--in-place` it restores to staging. In place it runs rsync as root with
+    `--chown` set to the current owner of `/var/vmail/<domain>` (read at run time), same symlink rule from `/var/vmail/<domain>` down.
+  - The staging copy is deleted after a successful in-place copy and kept (path in the error) after a failed one.
+  - Every step (request, safety backup start/result, outcome) appends a line to `var/log/audit.log`.
 - After a files restore: strip setuid/setgid (`chmod -R ug-s`) in the target.
 - DB restore: into `--target-db` that must not exist (created by the engine); dumps are piped through a filter that
   removes `DEFINER=` clauses.
