@@ -84,9 +84,9 @@ aws_log() { cat "$STUB_LOG/aws.log" 2>/dev/null || true; }
 
 @test "immutable init accepts a longer retention, creates repos and sets the lifecycle rule" {
   conf_with IMMUTABLE=yes
-  STUB_LOCK_DAYS=30 run vault init
+  STUB_NOREPO=1 STUB_LOCK_DAYS=30 run vault init
   [ "$status" -eq 0 ]
-  grep -q 'vault/alice | init' "$STUB_LOG/restic.log"
+  grep -q 'vault/alice | .*init' "$STUB_LOG/restic.log"
   [ "$(count_lines put-bucket-lifecycle "$STUB_LOG/aws.log")" -eq 1 ]
   aws_log | grep -q -- '--endpoint-url https://s3.example.com'
   [ "$(jget 'd["Rules"][0]["ID"]' <"$STUB_LOG/lifecycle.json")" = cwp-vault-noncurrent ]

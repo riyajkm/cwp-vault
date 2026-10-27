@@ -23,20 +23,19 @@ if days < need:
     sys.exit("the bucket default retention is %d days, expected at least %d" % (days, need))
 '
 
-# argv: RULE_ID PREFIX NONCURRENT_DAYS OUTFILE ; stdin: get-bucket-lifecycle-configuration JSON (or empty).
-# Writes the merged configuration to OUTFILE; prints "same" when our rule is already there unchanged.
+# argv: RULE_ID PREFIX NONCURRENT_DAYS ; stdin: get-bucket-lifecycle-configuration JSON (or empty).
+# Prints "same" or "changed", then the merged configuration on the second line.
 PY_LIFECYCLE='
 import sys, json
-rid, prefix, days, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+rid, prefix, days = sys.argv[1], sys.argv[2], int(sys.argv[3])
 raw = sys.stdin.read().strip()
 rules = (json.loads(raw) if raw else {}).get("Rules") or []
 ours = {"ID": rid, "Status": "Enabled", "Filter": {"Prefix": prefix},
         "NoncurrentVersionExpiration": {"NoncurrentDays": days}}
 state = "same" if ours in rules else "changed"
 merged = [r for r in rules if r.get("ID") != rid] + [ours]
-with open(out, "w") as f:
-    json.dump({"Rules": merged}, f)
 print(state)
+print(json.dumps({"Rules": merged}))
 '
 
 # argv: BEFORE(UTC "YYYY-MM-DDTHH:MM:SS" or empty) ; stdin: list-object-versions JSON.
@@ -79,7 +78,7 @@ aws_s3api() {
 
 # imm_init_check : refuse unless the bucket has the required lock; then merge in our lifecycle rule.
 imm_init_check() {
-  local msg out="$VAULT_TMP/lifecycle.$$.json" state raw=''
+  local msg out="$VAULT_TMP/lifecycle.$$.json" res state raw=''
   imm_need_tools
   aws_s3api get-object-lock-configuration --bucket "$S3_BUCKET" ||
     die 2 "cannot read the object lock settings of $S3_BUCKET: ${AWS_ERR:-no answer}. Immutable mode needs a bucket created with Object Lock enabled."
@@ -89,9 +88,12 @@ imm_init_check() {
   elif [[ $AWS_ERR != *NoSuchLifecycleConfiguration* ]]; then
     die 2 "cannot read the lifecycle rules of $S3_BUCKET: ${AWS_ERR:-no answer}"
   fi
-  state=$(printf '%s' "$raw" | python3 -I -c "$PY_LIFECYCLE" "$LIFECYCLE_ID" "${S3_PREFIX}vault/" "$((LOCK_DAYS + 7))" "$out") ||
+  res=$(printf '%s' "$raw" | python3 -I -c "$PY_LIFECYCLE" "$LIFECYCLE_ID" "${S3_PREFIX}vault/" "$((LOCK_DAYS + 7))") ||
     die 2 "cannot merge the lifecycle rules"
+  state=${res%%$'\n'*}
+  state=${state%$'\r'}
   if [[ $state == changed ]]; then
+    printf '%s\n' "${res#*$'\n'}" >"$out"
     aws_s3api put-bucket-lifecycle-configuration --bucket "$S3_BUCKET" --lifecycle-configuration "file://$out" ||
       { rm -f -- "$out"; die 2 "cannot set the lifecycle rule: ${AWS_ERR:-no answer}"; }
     log_info "lifecycle rule $LIFECYCLE_ID set: noncurrent versions expire after $((LOCK_DAYS + 7)) days"
@@ -164,6 +166,7 @@ cmd_recover() {
       fi
     done
     REC_REMOVED[i]=$n
+    ((n == ${#lines[@]})) || continue # a marker could not be removed: leave the repository alone
     rc=0
     restic_run "$a" unlock --remove-all || rc=$?
     if ((rc == 0)); then restic_run "$a" check || rc=$?; fi
