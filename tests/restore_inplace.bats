@@ -3,8 +3,13 @@ load helpers/common
 
 setup() {
   vault_setup
-  # runuser needs root; the stub just runs the command
-  printf '#!/usr/bin/env bash\nshift 3\nexec "$@"\n' >"$T/bin/runuser"
+  # runuser needs root; the stub logs who it was asked to run as, then just runs the command
+  cat >"$T/bin/runuser" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$STUB_LOG/runuser.log"
+shift 3
+exec "$@"
+STUB
   chmod +x "$T/bin/runuser"
   # restic stub that stages <INPLACE_SRC>/new.txt inside a restore, then behaves like the common stub
   cp "$T/bin/restic" "$T/bin/restic.real"
@@ -141,4 +146,6 @@ no_backup_call() { ! grep -q ' backup ' "$STUB_LOG/restic.log" 2>/dev/null; }
   [ "$status" -eq 0 ]
   [ "$(cat "$T/vmail/example.com/info/new.txt")" = staged ]
   [ "$(stat -c %u:%g "$T/vmail/example.com/info")" = "$(stat -c %u:%g "$T/vmail/example.com")" ]
+  # the copy ran as the owner of /var/vmail/<domain>, not as root
+  grep -q -- "^-u $(stat -c %U "$T/vmail/example.com") -- rsync " "$STUB_LOG/runuser.log"
 }

@@ -95,3 +95,39 @@ wait_job() {
   [ "$status" -eq 0 ]
   [ "$output" = "[]" ]
 }
+
+@test "a running job whose worker pid is gone is reported as failed" {
+  need_python
+  mkdir -p "$VAULT_HOME/var/status"
+  id=20260101T000000Z-alice
+  printf '{"job":"%s","state":"running","account":"alice","what":"files","percent":40,"bytes_done":5,"pid":2999999,"kind":"restore"}\n' "$id" >"$(status_file "restore-$id")"
+  run vout job --id "$id"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jget 'd["state"]')" = failed ]
+  [ "$(printf '%s' "$output" | jget 'd["ok"]')" = False ]
+  [ "$(printf '%s' "$output" | jget 'd["percent"]')" = 40 ]
+  run vout jobs --json
+  [ "$(printf '%s' "$output" | jget 'd[0]["state"]')" = failed ]
+}
+
+@test "a running job whose worker is alive stays running" {
+  need_python
+  mkdir -p "$VAULT_HOME/var/status"
+  id=20260101T000000Z-alice
+  sleep 30 &
+  HOLDER_PID=$!
+  printf '{"job":"%s","state":"running","account":"alice","what":"files","percent":40,"bytes_done":5,"pid":%d,"kind":"restore"}\n' "$id" "$HOLDER_PID" >"$(status_file "restore-$id")"
+  run vout job --id "$id"
+  [ "$(printf '%s' "$output" | jget 'd["state"]')" = running ]
+}
+
+@test "restic runs with the slower progress rate in a job worker only" {
+  need_python
+  run vout restore --account alice --what files --detach --json
+  job=$(printf '%s' "$output" | jget 'd["job"]')
+  wait_job "$job"
+  grep -q 'fps=0.5' "$STUB_LOG/restic.env.log"
+  run vout restore --account alice --what files --json
+  [ "$status" -eq 0 ]
+  tail -n 1 "$STUB_LOG/restic.env.log" | grep -q 'fps=0.016'
+}

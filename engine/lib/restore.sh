@@ -91,8 +91,10 @@ restore_apply() {
     rs=(runuser -u "$acct" -- "${rs[@]}") # the account's own rights bound what the copy can touch
   else
     root=$VMAIL_ROOT/$RS_MB_DOMAIN
-    owner=$(stat -c %u:%g -- "$root") || { RS_APPLY_ERR="cannot read the owner of $root"; return 1; }
-    rs+=("--chown=$owner") # keep the owner of /var/vmail/<domain>
+    owner=$(stat -c %U -- "$root") || { RS_APPLY_ERR="cannot read the owner of $root"; return 1; }
+    [[ $owner != UNKNOWN ]] || { RS_APPLY_ERR="the owner of $root has no user name"; return 1; }
+    chown -- "$owner" "$RS_TARGET" 2>/dev/null || log_warn "cannot hand the staging folder to $owner"
+    rs=(runuser -u "$owner" -- "${rs[@]}") # the domain owner's rights bound the copy, as for files
   fi
   for p in "$@"; do
     if ! restore_dest_check "$root" "$p"; then RS_APPLY_ERR="refused: $p is outside $root or has a symlink on its path"; return 1; fi
@@ -118,7 +120,7 @@ restore_finish() {
     pct=100
   fi
   if ((RS_WORKER)); then
-    x+=$(printf ',"state":"%s","account":%s,"what":%s,"percent":%d' "$state" "$(json_str "$RS_ACCT")" "$(json_str "$RS_WHAT")" "$pct")
+    x+=$(printf ',"state":"%s","account":%s,"what":%s,"percent":%d,"kind":"restore"' "$state" "$(json_str "$RS_ACCT")" "$(json_str "$RS_WHAT")" "$pct")
   fi
   if ((RS_INPLACE)); then
     for s in "${RS_SAFETY[@]}"; do ids+="${ids:+,}$(json_str "$s")"; done
@@ -236,7 +238,10 @@ cmd_restore() {
     job_spawn
     return 0
   fi
-  if ((RS_WORKER)); then job_update running 0 0; fi
+  if ((RS_WORKER)); then
+    RESTIC_PROGRESS_FPS=0.5
+    job_update running 0 0
+  fi
   if ((RS_INPLACE)); then
     restore_audit "$acct" "$snap" "$what" "$inc" "in-place restore requested"
     restore_safety_backup "$acct"
