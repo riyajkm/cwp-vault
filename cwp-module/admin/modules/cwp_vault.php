@@ -128,6 +128,7 @@ window.CWPV = <?= vault_json($cv) ?>;
   function renderDash() {
     var st = S.status, accts = st.accounts || [], h = '';
     fillAccounts();
+    if (W.step === 5 && $('#w-body').length) { return; } // initialised; stay on the final test step until the user finishes
     if (st.configured === false) { if (!$('#w-body').length || !W.step) { $('#cv-dash-body').html(wizardHtml()); wizardBind(); } return; } // keep typed input on refresh
     var okN = accts.filter(function (a) { return a.result === 'ok'; }).length, failN = accts.filter(function (a) { return a.result === 'failed'; }).length;
     var sum = accts.reduce(function (s, a) { return s + (+a.bytes_added || 0); }, 0);
@@ -314,7 +315,8 @@ window.CWPV = <?= vault_json($cv) ?>;
 
   // ---------- First-run wizard ----------
   function wizardHtml() {
-    var steps = ['W_S1', 'W_S2', 'W_S3', 'W_S4', 'W_S5'], h = '<div class="panel panel-primary"><div class="panel-heading">' + esc(tt('W_TITLE')) + '</div><div class="panel-body"><p>' + esc(tt('W_INTRO')) + '</p><ol class="breadcrumb">';
+    // Order: storage → keys → password → initialise → test (the test needs an initialised repo and the password).
+    var steps = ['W_S1', 'W_S2', 'W_S4', 'W_S5', 'W_S3'], h = '<div class="panel panel-primary"><div class="panel-heading">' + esc(tt('W_TITLE')) + '</div><div class="panel-body"><p>' + esc(tt('W_INTRO')) + '</p><ol class="breadcrumb">';
     steps.forEach(function (k, i) { h += '<li' + (i + 1 === W.step ? ' class="active"' : '') + '>' + (i + 1 === W.step ? '<strong>' + esc(tt(k)) + '</strong>' : (i + 1 < W.step ? '✔ ' : '') + esc(tt(k))) + '</li>'; });
     h += '</ol><div id="w-body">' + (W.step ? stepHtml(W.step) : '<span class="cv-spin" aria-hidden="true"></span>') + '</div><div id="w-msg" aria-live="polite"></div></div></div>';
     return h;
@@ -327,20 +329,20 @@ window.CWPV = <?= vault_json($cv) ?>;
         '<div class="form-group"><label for="w-sk">' + esc(tt('F_SECRETKEY')) + '</label><input type="password" id="w-sk" class="form-control" style="max-width:420px" autocomplete="new-password"><p class="help-block">' + esc(tt('H_KEYS')) + '</p></div>' +
         '<button type="button" class="btn btn-primary" data-w="s2">' + esc(tt('W_SAVE')) + '</button>';
     }
-    if (n === 3) { return '<button type="button" class="btn btn-primary" data-w="s3">' + esc(tt('BTN_TEST')) + '</button><div id="w-test" class="cv-mt"></div>'; }
-    if (n === 4) {
+    if (n === 3) {
       return W.pw ? '<div class="alert alert-danger" role="alert"><strong>' + esc(tt('W_WARN')) + '</strong></div><pre class="cv-pw">' + esc(W.pw) + '</pre>' +
         '<div class="checkbox"><label><input type="checkbox" id="w-ack"> ' + esc(tt('W_ACK')) + '</label></div><button type="button" class="btn btn-warning" id="w-setpw" data-w="s4b" disabled>' + esc(tt('W_SETPW')) + '</button>'
         : '<p>' + esc(tt('W_PWINFO')) + '</p><button type="button" class="btn btn-primary" data-w="s4a">' + esc(tt('W_GEN')) + '</button>';
     }
-    return '<p>' + esc(tt('W_INITINFO')) + '</p><button type="button" class="btn btn-primary" data-w="s5">' + esc(tt('W_INIT')) + '</button>';
+    if (n === 4) { return '<p>' + esc(tt('W_INITINFO')) + '</p><button type="button" class="btn btn-primary" data-w="s5">' + esc(tt('W_INIT')) + '</button>'; }
+    return '<button type="button" class="btn btn-primary" data-w="s3">' + esc(tt('BTN_TEST')) + '</button><div id="w-test" class="cv-mt"></div>';
   }
   function wizardGo(n) { W.step = n; $('#w-body').html(stepHtml(n)); $('#w-msg').empty(); $('#cv-dash-body .breadcrumb').replaceWith($(wizardHtml()).find('.breadcrumb')); }
   function wizardBind() {
     if (!W.step) {
       $.when(api('config'), api('secrets')).then(function (c, s) {
         S.cfg = c; S.secrets = s;
-        wizardGo(!(c.S3_ENDPOINT && c.S3_BUCKET) ? 1 : (!s.s3_key_set ? 2 : (!s.password_set ? 3 : 5)));
+        wizardGo(!(c.S3_ENDPOINT && c.S3_BUCKET) ? 1 : (!s.s3_key_set ? 2 : (!s.password_set ? 3 : 4)));
       }, function (e) { $('#w-msg').html(alertBox('danger', e)); });
     }
   }
@@ -352,13 +354,13 @@ window.CWPV = <?= vault_json($cv) ?>;
         var c = {}; GROUPS[0][1].slice(0, 3).forEach(function (f) { c[f[0]] = val(f, 'w-'); });
         api('config_set', {c: c}, true).then(function () { S.cfg = $.extend(S.cfg || {}, c); wizardGo(2); }, err);
       } else if (k === 's2') {
-        api('keys_save', {access_key: $('#w-ak').val(), secret_key: $('#w-sk').val()}, true).then(function (s) { S.secrets = s; wizardGo(3); }, err);
-      } else if (k === 's3') {
-        testStorage(b, $('#w-test')).then(function (ok) { if (ok) { b.prop('disabled', false); $('#w-test').append('<button type="button" class="btn btn-primary cv-mt" data-w="s3n">' + esc(tt('W_NEXT')) + '</button>'); } });
-      } else if (k === 's3n') { wizardGo(S.secrets && S.secrets.password_set ? 5 : 4); }
-      else if (k === 's4a') { api('wizard_gen', {}, true).then(function (r) { W.pw = r.password; wizardGo(4); }, err); }
-      else if (k === 's4b') { api('wizard_commit', {ack: $('#w-ack').is(':checked') ? '1' : '0'}, true).then(function () { W.pw = null; (S.secrets || {}).password_set = true; wizardGo(5); }, err); }
-      else if (k === 's5') { api('init', {}, true).then(function () { W.step = 0; notify(tt('W_TITLE'), tt('W_DONE'), false); loadDash(); }, err); }
+        api('keys_save', {access_key: $('#w-ak').val(), secret_key: $('#w-sk').val()}, true).then(function (s) { S.secrets = s; wizardGo(s && s.password_set ? 4 : 3); }, err);
+      } else if (k === 's4a') { api('wizard_gen', {}, true).then(function (r) { W.pw = r.password; wizardGo(3); }, err); }
+      else if (k === 's4b') { api('wizard_commit', {ack: $('#w-ack').is(':checked') ? '1' : '0'}, true).then(function () { W.pw = null; (S.secrets || {}).password_set = true; wizardGo(4); }, err); }
+      else if (k === 's5') { W.inited = true; api('init', {}, true).then(function () { wizardGo(5); }, err); }
+      else if (k === 's3') {
+        testStorage(b, $('#w-test')).then(function (ok) { b.prop('disabled', false); if (ok) { $('#w-test').append('<button type="button" class="btn btn-primary cv-mt" data-w="done">' + esc(tt('W_NEXT')) + '</button>'); } });
+      } else if (k === 'done') { W.step = 0; W.inited = false; notify(tt('W_TITLE'), tt('W_DONE'), false); loadDash(); }
     });
 
   // ---------- Logs ----------
