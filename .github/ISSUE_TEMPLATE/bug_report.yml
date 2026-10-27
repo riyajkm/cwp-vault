@@ -1,0 +1,50 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Redact keys, passwords, IPs, hostnames and account names (use `example.com`, `alice`, `bucket-name`).
+        Security issues: use the private "Report a vulnerability" link, not this form.
+  - type: input
+    id: cwp-version
+    attributes:
+      label: CWP version
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      placeholder: AlmaLinux 8
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Storage provider
+      placeholder: Contabo, Wasabi, B2, R2, MinIO, AWS
+    validations:
+      required: true
+  - type: input
+    id: vault-version
+    attributes:
+      label: CWP Vault version
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs
+      render: shell
