@@ -1,0 +1,6 @@
+# /etc/cron.d/cwp-vault
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+30 1 * * *  root /usr/local/bin/vault backup --all --quiet
+0  4 * * 0  root /usr/local/bin/vault prune --all --quiet
+0  4 * * 3  root /usr/local/bin/vault check --all --quiet

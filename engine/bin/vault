@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# CWP Vault engine entry point. See docs/ENGINE.md.
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+
+VAULT_VERSION=0.2.0
+VAULT_SELF=$(readlink -f -- "${BASH_SOURCE[0]}")
+VAULT_LIB=${VAULT_LIB:-${VAULT_SELF%/*}/../lib}
+VAULT_HOME=${VAULT_HOME:-/usr/local/cwp-vault}
+
+# shellcheck source=../lib/log.sh
+source "$VAULT_LIB/log.sh"
+# shellcheck source=../lib/config.sh
+source "$VAULT_LIB/config.sh"
+# shellcheck source=../lib/lock.sh
+source "$VAULT_LIB/lock.sh"
+# shellcheck source=../lib/accounts.sh
+source "$VAULT_LIB/accounts.sh"
+# shellcheck source=../lib/restic.sh
+source "$VAULT_LIB/restic.sh"
+# shellcheck source=../lib/status.sh
+source "$VAULT_LIB/status.sh"
+# shellcheck source=../lib/notify.sh
+source "$VAULT_LIB/notify.sh"
+# shellcheck source=../lib/backup.sh
+source "$VAULT_LIB/backup.sh"
+# shellcheck source=../lib/server.sh
+source "$VAULT_LIB/server.sh"
+# shellcheck source=../lib/maintain.sh
+source "$VAULT_LIB/maintain.sh"
+# shellcheck source=../lib/restore.sh
+source "$VAULT_LIB/restore.sh"
+# shellcheck source=../lib/storage.sh
+source "$VAULT_LIB/storage.sh"
+# shellcheck source=../lib/admin.sh
+source "$VAULT_LIB/admin.sh"
+
+ARG_ACCOUNT='' ARG_ALL=0 ARG_DRY=0 ARG_JSON=0 ARG_SNAPSHOT=latest ARG_WHAT=''
+ARG_DB='' ARG_TARGET='' ARG_TARGET_DB='' ARG_TAIL='' ARG_QUIET=0
+declare -a ARG_POS=() ARG_PATHS=()
+VAULT_CMD=''
+
+usage_err() {
+  log_error "$*"
+  if [[ $ARG_JSON == 1 ]]; then printf '{"error":%s,"code":2}\n' "$(json_str "$*")"; fi
+  printf "Try: vault %s --help\n" "${VAULT_CMD:-}" >&2
+  exit 2
+}
+
+help_text() {
+  case ${1:-} in
+    init) echo "vault init [--json]              create missing repositories (accounts and _server)" ;;
+    backup) echo "vault backup --account U | --all [--dry-run] [--quiet]" ;;
+    restore) cat <<'EOF'
+vault restore --account U --what files|mail|meta|mailauth|db [--snapshot ID|latest]
+              [--path P ...] [--db NAME] [--target DIR | --target-db NAME] [--dry-run] [--json]
+Files go to --target (must be new or empty; default: a fresh directory under the restore root).
+Databases go into --target-db, which must not exist.
+EOF
+      ;;
+    snapshots) echo "vault snapshots --account U [--json]" ;;
+    ls) echo "vault ls --account U [--snapshot ID] [--path P] --json    list one directory level of a snapshot" ;;
+    prune) echo "vault prune --account U | --all [--quiet]" ;;
+    check) echo "vault check --account U | --all [--quiet]" ;;
+    unlock) echo "vault unlock --account U | --all" ;;
+    status) echo "vault status [--json]" ;;
+    test-storage) echo "vault test-storage [--json]     write, read back and delete a probe snapshot" ;;
+    verify-secrets) echo "vault verify-secrets           check that every repository opens with the current password" ;;
+    config) echo "vault config get [--json] | vault config set KEY=VALUE ..." ;;
+    secrets) echo "vault secrets status [--json] | vault secrets set   (KEY=VALUE lines on stdin)" ;;
+    log) echo "vault log --tail N [--json]" ;;
+    version) echo "vault version" ;;
+    *) cat <<'EOF'
+Usage: vault <command> [options]   (vault <command> --help for details)
+Commands: init backup restore snapshots ls prune check unlock status
+          test-storage verify-secrets config secrets log version
+Exit codes: 0 ok, 1 some accounts failed, 2 config/usage error, 3 already running, 4 storage unreachable
+EOF
+      ;;
+  esac
+}
+
+# args_parse "allowed option names" args...
+args_parse() {
+  local allowed=" $1 " opt val name has
+  shift
+  ARG_POS=()
+  while (($# > 0)); do
+    opt=$1
+    shift
+    has=0
+    val=''
+    if [[ $opt != --* ]]; then
+      [[ $allowed == *" pos "* ]] || usage_err "unexpected argument"
+      ARG_POS+=("$opt")
+      continue
+    fi
+    if [[ $opt == *=* ]]; then
+      val=${opt#*=}
+      opt=${opt%%=*}
+      has=1
+    fi
+    name=${opt#--}
+    [[ $name == quiet ]] || [[ $allowed == *" $name "* ]] || usage_err "unknown option $opt"
+    case $name in
+      all) ARG_ALL=1 ;;
+      dry-run) ARG_DRY=1 ;;
+      json) ARG_JSON=1 ;;
+      quiet) ARG_QUIET=1 ;;
+      account | snapshot | what | path | db | target | target-db | tail)
+        if ((!has)); then
+          (($# > 0)) || usage_err "$opt needs a value"
+          val=$1
+          shift
+        fi
+        case $name in
+          account) ARG_ACCOUNT=$val ;;
+          snapshot) ARG_SNAPSHOT=$val ;;
+          what) ARG_WHAT=$val ;;
+          path) ARG_PATHS+=("$val") ;;
+          db) ARG_DB=$val ;;
+          target) ARG_TARGET=$val ;;
+          target-db) ARG_TARGET_DB=$val ;;
+          tail) ARG_TAIL=$val ;;
+          *) ;;
+        esac
+        ;;
+      *) usage_err "unknown option $opt" ;;
+    esac
+  done
+}
+
+# shellcheck disable=SC2329 # invoked through trap
+cleanup() {
+  local fd
+  for fd in "${LOCK_FDS[@]}"; do exec {fd}>&- 2>/dev/null || true; done
+  run_unregister
+}
+
+# with_alerts FUNC : heartbeat + failure notifications around a long-running command.
+with_alerts() {
+  local rc=0
+  hb_ping start
+  "$@" || rc=$?
+  if ((rc == 0)); then
+    hb_ping success
+  else
+    hb_ping fail
+    notify_failure "$VAULT_CMD" "$rc"
+  fi
+  return "$rc"
+}
+
+main() {
+  local cmd=${1:-} a rc=0
+  if (($# > 0)); then shift; fi
+  case $cmd in
+    '' | -h | --help | help) help_text; exit 0 ;;
+    version | --version) echo "cwp-vault $VAULT_VERSION"; exit 0 ;;
+    init | backup | restore | snapshots | ls | prune | check | unlock | status | test-storage | verify-secrets | config | secrets | log) ;;
+    *) VAULT_CMD=''; usage_err "unknown command: $cmd" ;;
+  esac
+  for a in "$@"; do
+    if [[ $a == -h || $a == --help ]]; then help_text "$cmd"; exit 0; fi
+  done
+  VAULT_CMD=$cmd
+  case $cmd in
+    init) args_parse "json" "$@" ;;
+    verify-secrets) args_parse "" "$@" ;;
+    backup) args_parse "account all dry-run" "$@" ;;
+    restore) args_parse "account snapshot what path db target target-db dry-run json" "$@" ;;
+    snapshots) args_parse "account json" "$@" ;;
+    ls) args_parse "account snapshot path json" "$@" ;;
+    prune | check | unlock) args_parse "account all" "$@" ;;
+    status | test-storage) args_parse "json" "$@" ;;
+    config | secrets) args_parse "json pos" "$@" ;; # sub-command and KEY=VALUE pairs
+    log) args_parse "tail json" "$@" ;;
+    *) ;;
+  esac
+  if [[ $ARG_QUIET == 1 ]]; then VAULT_QUIET=1; fi
+
+  vault_paths
+  vault_dirs
+  trap cleanup EXIT
+  trap 'log_error "unexpected failure at line $LINENO"' ERR
+  run_register
+
+  case $cmd in
+    status) cmd_status; exit 0 ;;
+    log) cmd_log; exit 0 ;;
+    config) cmd_config; exit 0 ;;
+    secrets) cmd_secrets; exit 0 ;;
+    *) ;;
+  esac
+
+  cfg_load
+  case $cmd in
+    init) cmd_init || rc=$? ;;
+    backup) if ((ARG_DRY)); then cmd_backup || rc=$?; else with_alerts cmd_backup || rc=$?; fi ;; # a dry run never pings or alerts
+    restore) cmd_restore || rc=$? ;;
+    snapshots) cmd_snapshots || rc=$? ;;
+    ls) cmd_ls || rc=$? ;;
+    prune) with_alerts cmd_prune || rc=$? ;;
+    check) with_alerts cmd_check || rc=$? ;;
+    unlock) cmd_unlock || rc=$? ;;
+    test-storage) cmd_test_storage || rc=$? ;;
+    verify-secrets) cmd_verify_secrets || rc=$? ;;
+    *) ;;
+  esac
+  exit "$rc"
+}
+
+main "$@"
