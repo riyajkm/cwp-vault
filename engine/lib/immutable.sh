@@ -54,6 +54,13 @@ for m in (json.loads(raw) if raw else {}).get("DeleteMarkers") or []:
     print(k + "\t" + v)
 '
 
+# stdin: delete-objects JSON answer (empty with Quiet). Prints the number of per-object errors.
+PY_DELERR='
+import sys, json
+raw = sys.stdin.read().strip()
+print(len((json.loads(raw) if raw else {}).get("Errors") or []))
+'
+
 imm_need_tools() {
   command -v aws >/dev/null 2>&1 || die 2 "immutable mode needs the aws CLI v2 (to read the bucket's object lock settings); install it and retry"
   command -v python3 >/dev/null 2>&1 || die 2 "immutable mode needs python3"
@@ -83,6 +90,37 @@ aws_error_code() {
   env AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" AWS_PAGER='' \
     AWS_DEFAULT_REGION=us-east-1 \
     timeout 120 aws --endpoint-url "$S3_ENDPOINT" --debug s3api "$@" </dev/null 2>&1 >/dev/null | grep -o '<Code>[A-Za-z]*</Code>' | head -n 1 | sed 's/<[^>]*>//g' || true
+}
+
+# imm_delete_batch LINES... : each line is "key<TAB>versionid" (at most 1000). One delete-objects call;
+# sets IMM_DELETED. Returns 1 (AWS_ERR set) when the call fails or S3 refuses any object.
+IMM_DELETED=0
+imm_delete_batch() {
+  local f="$VAULT_TMP/delete.$$.json" line key ver nerr first=1 rc=0
+  IMM_DELETED=0
+  {
+    printf '{"Objects":['
+    for line in "$@"; do
+      IFS=$'	' read -r key ver <<<"$line"
+      if ((first)); then first=0; else printf ','; fi
+      printf '{"Key":'
+      json_str "$key"
+      printf ',"VersionId":'
+      json_str "$ver"
+      printf '}'
+    done
+    printf '],"Quiet":true}
+'
+  } >"$f"
+  aws_s3api delete-objects --bucket "$S3_BUCKET" --delete "file://$f" || rc=$?
+  rm -f -- "$f"
+  ((rc == 0)) || return 1
+  nerr=$(printf '%s' "$AWS_OUT" | python3 -I -c "$PY_DELERR") || { AWS_ERR="unreadable delete-objects answer"; return 1; }
+  IMM_DELETED=$(($# - nerr))
+  if ((nerr > 0)); then
+    AWS_ERR="S3 refused $nerr of $# objects"
+    return 1
+  fi
 }
 
 # imm_init_check : refuse unless the bucket has the required lock; then merge in our lifecycle rule.
@@ -138,7 +176,7 @@ recover_json() {
 }
 
 cmd_recover() {
-  local a before='' norm_before='' line key ver n rc fail=0 err='' i
+  local a before='' norm_before='' n rc fail=0 err='' i b
   local -a lines
   [[ $IMMUTABLE == yes ]] || die 2 "recover only works in immutable mode (set IMMUTABLE=yes)"
   imm_need_tools
@@ -164,11 +202,11 @@ cmd_recover() {
     i=$((${#REC_NAMES[@]} - 1))
     [[ $ARG_YES == 1 ]] || continue
     n=0
-    for line in "${lines[@]}"; do
-      IFS=$'\t' read -r key ver <<<"$line"
-      if aws_s3api delete-object --bucket "$S3_BUCKET" --key "$key" --version-id "$ver"; then
-        n=$((n + 1))
-      else
+    for ((b = 0; b < ${#lines[@]}; b += 1000)); do
+      rc=0
+      imm_delete_batch "${lines[@]:b:1000}" || rc=$?
+      n=$((n + IMM_DELETED))
+      if ((rc != 0)); then
         err="$a: cannot remove a delete marker: ${AWS_ERR:-no answer}"
         log_error "recover $err"
         fail=1
