@@ -63,7 +63,7 @@ status_running() { # prints JSON objects separated by commas
     name=${f##*/}
     name=${name%.lock}
     [[ $name == vault ]] && continue
-    read -r pid cmd started <"$f" || continue
+    IFS=" " read -r pid cmd started <"$f" || continue # global IFS is newline+tab; fields are space-separated
     [[ $pid =~ ^[0-9]+$ ]] || continue
     kill -0 "$pid" 2>/dev/null || continue
     if ((first)); then first=0; else printf ','; fi
