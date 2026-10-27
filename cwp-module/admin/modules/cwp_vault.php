@@ -21,6 +21,37 @@ $tx = function ($k) use ($T) { return h($T[$k] ?? $k); };
 #cwp-vault .tab-content{padding-top:15px}
 #cwp-vault .cv-crumb a{cursor:pointer}
 #cwp-vault .cv-mt{margin-top:10px}
+#cwp-vault .sr-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+#cwp-vault .cv-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:12px 16px;margin-bottom:16px;background:#fff;border:1px solid #dcdfe3;border-radius:6px}
+#cwp-vault .cv-head .cv-grow{flex:1 1 auto;min-width:160px;color:#666}
+#cwp-vault .cv-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-weight:600;font-size:13px;line-height:20px;border:1px solid transparent;white-space:nowrap}
+#cwp-vault .cv-ok{background:#dff0d8;color:#2d5a2a;border-color:#c3e0b8}
+#cwp-vault .cv-bad{background:#f2dede;color:#8c2f2c;border-color:#e4bcbc}
+#cwp-vault .cv-run{background:#d9edf7;color:#245a78;border-color:#b5dbed}
+#cwp-vault .cv-warn{background:#fcf8e3;color:#6f5628;border-color:#ecdfa8}
+#cwp-vault .cv-none{background:#eef0f2;color:#4a4f55;border-color:#d8dce0}
+#cwp-vault .cv-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+#cwp-vault .cv-stat{background:#fff;border:1px solid #dcdfe3;border-radius:6px;padding:14px 16px;display:flex;gap:12px;align-items:flex-start;min-width:0}
+#cwp-vault .cv-stat svg{flex:none;width:28px;height:28px;color:#5b7083}
+#cwp-vault .cv-stat .cv-lbl{color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+#cwp-vault .cv-stat .cv-val{font-size:22px;line-height:1.3;font-weight:600;word-break:break-word}
+#cwp-vault .cv-stat small{color:#666;display:block}
+#cwp-vault .cv-stat .cv-cd{font-variant-numeric:tabular-nums}
+#cwp-vault .cv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+#cwp-vault .cv-card{background:#fff;border:1px solid #dcdfe3;border-radius:6px;padding:14px 16px}
+#cwp-vault .cv-card-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+#cwp-vault .cv-card-h strong{font-size:15px;word-break:break-all}
+#cwp-vault .cv-card dl{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin:0 0 10px}
+#cwp-vault .cv-card dt{font-weight:400;color:#666;font-size:12px}
+#cwp-vault .cv-card dd{margin:0}
+#cwp-vault .cv-card .cv-err{color:#8c2f2c;font-size:12px;margin:0 0 8px;word-break:break-word}
+#cwp-vault .cv-card .cv-act{display:flex;flex-wrap:wrap;gap:6px}
+#cwp-vault .cv-running{background:#f3f9fd;border:1px solid #b5dbed;border-radius:6px;padding:10px 16px;margin-bottom:16px}
+#cwp-vault .cv-empty{text-align:center;padding:32px 16px;border:1px dashed #c8ccd0;border-radius:6px;color:#666}
+#cwp-vault .cv-sch-sel{display:inline-block;width:auto}
+#cwp-vault .cv-dlform{max-width:420px}
+@media (max-width:991px){#cwp-vault .cv-stats{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:767px){#cwp-vault .cv-stats{grid-template-columns:1fr}#cwp-vault .cv-grid{grid-template-columns:1fr}#cwp-vault .cv-head .btn{width:100%}}
 </style>
 
 <h4><?= $tx('TITLE') ?></h4>
@@ -46,6 +77,8 @@ $tx = function ($k) use ($T) { return h($T[$k] ?? $k); };
     <div id="rs-result" aria-live="polite"></div>
     <h5><?= $tx('RS_RECENT') ?></h5>
     <div id="rs-recent"></div>
+    <h5><?= $tx('DL_RECENT') ?></h5>
+    <div id="rs-exports"></div>
   </div>
   <div class="tab-pane" id="cv-settings"><div id="cv-settings-body"><span class="cv-spin" aria-hidden="true"></span> <?= $tx('LOADING') ?></div></div>
   <div class="tab-pane" id="cv-logs">
@@ -117,48 +150,105 @@ window.CWPV = <?= vault_json($cv) ?>;
   }
 
   // ---------- Dashboard ----------
+  var SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">';
+  var ICON = {
+    shield: SVG + '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>',
+    clock: SVG + '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    data: SVG + '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg>',
+    next: SVG + '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>'
+  };
   function runningFor(a) {
     return ((S.status && S.status.running) || []).some(function (r) { return r.account === a || !r.account || r.account === 'all' || r.account === '_all'; });
   }
+  function soft(p) { var d = $.Deferred(); p.done(function (v) { d.resolve(v); }).fail(function () { d.resolve(null); }); return d.promise(); }
+  function pill(res, extra) {
+    var m = {ok: ['cv-ok', '✔', 'R_OK'], failed: ['cv-bad', '✖', 'R_FAILED'], running: ['cv-run', '', 'R_RUNNING'], skipped: ['cv-warn', '–', 'R_SKIPPED'], never: ['cv-none', '○', 'R_NEVER']}[res] || ['cv-none', '○', 'R_NEVER'];
+    return '<span class="cv-pill ' + m[0] + '">' + (res === 'running' ? '<span class="cv-spin" aria-hidden="true"></span>' : '<span aria-hidden="true">' + m[1] + '</span>') + esc(extra || tt(m[2])) + '</span>';
+  }
   function loadDash() {
     clearTimeout(S.timer);
-    $.when(api('status'), S.sched ? S.sched : api('schedule')).then(function (st, sc) {
-      S.status = st; S.sched = sc; renderDash(); $('#ab-version').text(st.version || '-');
+    $.when(api('status'), S.target ? S.target : soft(api('config'))).then(function (st, cfg) {
+      S.status = st; S.target = cfg || S.target; S.skew = st.now_epoch ? st.now_epoch - Date.now() / 1000 : 0; // correct for a wrong browser clock
+      renderDash(); cdTick(); $('#ab-version').text(st.version || '-');
       S.timer = setTimeout(loadDash, (st.running && st.running.length) ? 5000 : 60000);
     }, function (e) { $('#cv-dash-body').html(alertBox('danger', e)); S.timer = setTimeout(loadDash, 60000); });
+  }
+  function stat(icon, lbl, val, sub, extra) {
+    return '<div class="cv-stat">' + ICON[icon] + '<div style="min-width:0"><div class="cv-lbl"' + (extra || '') + '>' + esc(tt(lbl)) + '</div>' + val + (sub ? '<small>' + sub + '</small>' : '') + '</div></div>';
   }
   function renderDash() {
     var st = S.status, accts = st.accounts || [], h = '';
     fillAccounts();
     if (W.step === 5 && $('#w-body').length) { return; } // initialised; stay on the final test step until the user finishes
     if (st.configured === false) { if (!$('#w-body').length || !W.step) { $('#cv-dash-body').html(wizardHtml()); wizardBind(); } return; } // keep typed input on refresh
-    var okN = accts.filter(function (a) { return a.result === 'ok'; }).length, failN = accts.filter(function (a) { return a.result === 'failed'; }).length;
-    var sum = accts.reduce(function (s, a) { return s + (+a.bytes_added || 0); }, 0);
+    var failN = accts.filter(function (a) { return a.result === 'failed'; }).length, okN = accts.filter(function (a) { return a.result === 'ok'; }).length;
+    var ranN = accts.filter(function (a) { return a.finished; }).length, running = st.running || [], anyRun = running.length > 0;
     var last = accts.concat(st.server ? [st.server] : []).filter(function (a) { return a.finished; }).sort(function (a, b) { return a.finished < b.finished ? 1 : -1; })[0];
-    var next = S.sched && S.sched.next ? when(S.sched.next) : esc(tt('NOT_SCHEDULED'));
-    var anyRun = (st.running || []).length > 0;
-    function tile(n, l) { return '<div class="col-sm-3 col-xs-6"><div class="panel panel-default"><div class="panel-body cv-tile"><div class="cv-num">' + n + '</div><div class="cv-lbl">' + esc(tt(l)) + '</div></div></div></div>'; }
-    h += '<div class="row">' + tile(okN + ' / ' + accts.length, 'T_ACCOUNTS') +
-      tile(anyRun ? badge('running') : (last ? badge(failN ? 'failed' : last.result) + '<br><small>' + ago(last.finished) + '</small>' : badge('never')), 'T_LASTRUN') +
-      tile(esc(bytes(sum)), 'T_STORED') + tile('<small>' + next + '</small>', 'T_NEXT') + '</div>';
-    if (st.immutable && st.immutable.enabled) { h += '<p><span class="label label-success">' + L('IMM_BADGE', {m: st.immutable.mode, d: st.immutable.days}) + '</span></p>'; }
-    h += '<p><button type="button" class="btn btn-primary" data-act="backup-all"' + (anyRun ? ' disabled' : '') + '>' + esc(tt('BTN_BACKUP_ALL')) + '</button></p>';
-    h += '<div class="cv-wrap"><table class="table table-striped table-hover"><thead><tr>' +
-      ['TH_ACCOUNT', 'TH_LAST', 'TH_RESULT', 'TH_DURATION', 'TH_ADDED', 'TH_SNAPS', 'TH_ACTIONS'].map(function (k) { return '<th scope="col">' + esc(tt(k)) + '</th>'; }).join('') + '</tr></thead><tbody>';
-    if (!accts.length) { h += '<tr><td colspan="7">' + esc(tt('NO_ACCOUNTS')) + '</td></tr>'; }
+    var sum = accts.reduce(function (s, a) { return s + (+a.bytes_added || 0); }, 0);
+    var sc = st.schedule, cfg = S.target || {}, host = String(cfg.S3_ENDPOINT || '').replace(/^https?:\/\//, '');
+    // header strip: overall health, immutable badge, storage target, run-all button
+    h += '<div class="cv-head">' + (anyRun ? pill('running', tt('H_RUNNING')) : failN ? pill('failed', tt('H_FAILING', {n: failN})) : !ranN ? pill('never', tt('H_NEVER')) : pill('ok', tt('H_ALLOK'))) +
+      (st.immutable && st.immutable.enabled ? '<span class="cv-pill cv-ok">' + L('IMM_BADGE', {m: st.immutable.mode, d: st.immutable.days}) + '</span>' : '') +
+      '<span class="cv-grow">' + (cfg.S3_BUCKET ? esc(tt('H_STORAGE')) + ': <strong>' + esc(cfg.S3_BUCKET) + '</strong>' + (host ? ' <span class="text-muted">@ ' + esc(host) + '</span>' : '') : '') + '</span>' +
+      '<button type="button" class="btn btn-primary" data-act="backup-all"' + (anyRun ? ' disabled' : '') + '>' + esc(tt('BTN_BACKUP_ALL')) + '</button></div>';
+    // four stat cards
+    var nextAt = sc && sc.next_run_epoch && sc.backup && sc.backup.enabled ? esc(tt('CD_AT', {t: new Date(sc.next_run_epoch * 1000).toLocaleString([], {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})})) : '';
+    h += '<div class="cv-stats">' + stat('shield', 'T_ACCOUNTS', '<div class="cv-val">' + okN + ' / ' + accts.length + '</div>') +
+      stat('clock', 'T_LASTRUN', '<div class="cv-val"' + (last ? ' title="' + when(last.finished) + '"' : '') + '>' + (anyRun ? esc(tt('R_RUNNING')) : last ? ago(last.finished) : esc(tt('NEVER'))) + '</div>', last ? pill(failN ? 'failed' : last.result) : '') +
+      stat('data', 'T_LASTADDED', '<div class="cv-val">' + esc(bytes(sum)) + '</div>') +
+      stat('next', 'T_NEXTBACKUP', '<div class="cv-val cv-cd" id="cv-cd">&nbsp;</div><span class="sr-live" id="cv-cd-live" role="status" aria-live="polite"></span>', nextAt, ' id="cv-cd-lbl"') + '</div>';
+    if (anyRun) {
+      h += '<div class="cv-running" role="status"><strong>' + esc(tt('RUNNING_NOW')) + '</strong>' + running.map(function (r) {
+        var pc = r.percent == null ? 100 : Math.max(0, Math.min(100, +r.percent || 0)), a = r.account && r.account !== 'all' && r.account !== '_all' ? r.account : tt('RUNNING_ALL');
+        return '<div class="cv-mt">' + esc(a) + '<div class="progress" style="margin:4px 0 0"><div class="progress-bar progress-bar-striped active" role="progressbar" aria-valuemin="0" aria-valuemax="100"' + (r.percent == null ? '' : ' aria-valuenow="' + pc + '"') + ' style="width:' + pc + '%">' + (r.percent == null ? '' : pc + '%') + '</div></div></div>';
+      }).join('') + '</div>';
+    }
+    if (!accts.length) { return $('#cv-dash-body').html(h + '<div class="cv-empty"><strong>' + esc(tt('EMPTY_TITLE')) + '</strong><br>' + esc(tt('EMPTY_TEXT')) + '</div>'); }
+    h += '<div class="cv-grid">';
     accts.forEach(function (a) {
-      var run = runningFor(a.account), res = run ? 'running' : (a.finished ? a.result : 'never');
-      h += '<tr><td>' + esc(a.account) + '</td><td>' + ago(a.finished) + '</td><td>' + badge(res) +
-        (a.error && res === 'failed' ? '<br><small class="text-danger">' + esc(a.error) + '</small>' : '') + '</td><td>' + esc(a.finished ? dur(a.duration_s) : '-') + '</td><td>' +
-        esc(a.finished ? bytes(a.bytes_added) : '-') + '</td><td>' + esc(!a.finished || a.snapshots == null ? '-' : a.snapshots) + '</td><td>' +
-        '<button type="button" class="btn btn-primary btn-xs" data-act="backup" data-acc="' + esc(a.account) + '"' + (anyRun ? ' disabled' : '') + '>' + esc(tt('BTN_BACKUP')) + '</button> ' +
-        '<button type="button" class="btn btn-default btn-xs" data-act="snaps" data-acc="' + esc(a.account) + '">' + esc(tt('BTN_SNAPS')) + '</button></td></tr>';
+      var res = runningFor(a.account) ? 'running' : (a.finished ? a.result : 'never'), has = !!a.finished;
+      function m(k, v, t) { return '<div><dt>' + esc(tt(k)) + '</dt><dd' + (t ? ' title="' + t + '"' : '') + '>' + v + '</dd></div>'; }
+      h += '<div class="cv-card"><div class="cv-card-h"><strong>' + esc(a.account) + '</strong>' + pill(res) + '</div>' +
+        (a.error && res === 'failed' ? '<p class="cv-err">' + esc(a.error) + '</p>' : '') +
+        '<dl>' + m('M_LAST', has ? ago(a.finished) : '-', has ? when(a.finished) : '') + m('M_DURATION', esc(has ? dur(a.duration_s) : '-')) +
+        m('M_ADDED', esc(has ? bytes(a.bytes_added) : '-')) + m('M_SNAPS', esc(!has || a.snapshots == null ? '-' : a.snapshots)) + '</dl>' +
+        '<div class="cv-act"><button type="button" class="btn btn-primary btn-xs" data-act="backup" data-acc="' + esc(a.account) + '"' + (anyRun ? ' disabled' : '') + '>' + esc(tt('BTN_BACKUP')) + '</button>' +
+        '<button type="button" class="btn btn-default btn-xs" data-act="snaps" data-acc="' + esc(a.account) + '">' + esc(tt('BTN_RESTORE')) + '</button>' +
+        '<button type="button" class="btn btn-default btn-xs" data-act="dl" data-acc="' + esc(a.account) + '">' + esc(tt('BTN_DOWNLOAD')) + '</button></div></div>';
     });
-    $('#cv-dash-body').html(h + '</tbody></table></div>');
+    $('#cv-dash-body').html(h + '</div>');
   }
+  // Countdown to the next backup: ticks every second, announces to screen readers only every 5 minutes (every minute in the last 5).
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function cdTick() {
+    var el = document.getElementById('cv-cd');
+    if (!el || document.hidden || !S.status) { return; }
+    var sc = S.status.schedule, anyRun = (S.status.running || []).length > 0, txt, lbl = 'T_NEXTBACKUP', live = null;
+    if (!sc || !sc.backup) { txt = tt('CD_NONE'); }
+    else if (!sc.backup.enabled) { txt = tt('CD_OFF'); }
+    else if (!sc.next_run_epoch) { txt = tt('CD_NONE'); }
+    else {
+      var rem = Math.floor(sc.next_run_epoch - (Date.now() / 1000 + (S.skew || 0)));
+      if (rem > 0) {
+        var d = Math.floor(rem / 86400), hh = Math.floor(rem % 86400 / 3600), mm = Math.floor(rem % 3600 / 60), ss = rem % 60;
+        txt = d ? d + 'd ' + hh + 'h ' + pad2(mm) + 'm' : (hh ? hh + 'h ' + pad2(mm) + 'm ' + pad2(ss) + 's' : mm + 'm ' + pad2(ss) + 's');
+        lbl = 'T_NEXTIN';
+        var mk = Math.floor(rem / 60), key = rem < 300 ? 'm' + mk : 'f' + Math.floor(mk / 5);
+        if (S.cdKey !== key) { S.cdKey = key; live = tt('CD_LIVE', {h: Math.floor(mk / 60), m: mk % 60}); }
+      } else {
+        txt = anyRun ? tt('CD_RUNNING') : tt('CD_SOON');
+        if (S.cdFired !== sc.next_run_epoch) { S.cdFired = sc.next_run_epoch; clearTimeout(S.timer); S.timer = setTimeout(loadDash, 5000); } // refresh once when the time arrives
+        if (S.cdKey !== txt) { S.cdKey = txt; live = txt; }
+      }
+    }
+    if (el.textContent !== txt) { el.textContent = txt; }
+    $('#cv-cd-lbl').text(tt(lbl));
+    if (live) { $('#cv-cd-live').text(live); }
+  }
+  setInterval(cdTick, 1000);
   $('#cv-dash').on('click', '[data-act]', function () {
     var b = $(this), act = b.data('act'), acc = b.data('acc') || '';
-    if (act === 'snaps') { $('#rs-account').val(acc); $('a[href="#cv-restore"]').tab('show'); loadSnaps(); return; }
+    if (act === 'snaps' || act === 'dl') { R.wantDl = act === 'dl'; $('#rs-account').val(acc); $('a[href="#cv-restore"]').tab('show'); loadSnaps(); return; }
     if (act !== 'backup' && act !== 'backup-all') { return; }
     confirmBox(tt('BTN_BACKUP'), '<p>' + L(act === 'backup' ? 'CF_BACKUP' : 'CF_BACKUP_ALL', {a: acc}) + '</p>', tt('BTN_BACKUP'), function () {
       api('backup', {account: acc}, true).then(function () { notify(tt('BTN_BACKUP'), tt('BACKUP_STARTED'), false); setTimeout(loadDash, 1500); }, function (e) { notify(tt('E_TITLE'), e, true); });
@@ -185,6 +275,7 @@ window.CWPV = <?= vault_json($cv) ?>;
           '</td><td><button type="button" class="btn btn-default btn-xs" data-i="' + i + '">' + esc(tt('BTN_SELECT')) + '</button></td></tr>';
       });
       $('#rs-snaps').html(h + '</tbody></table></div>');
+      if (R.wantDl) { R.wantDl = false; $('#rs-snaps button[data-i]').filter(function () { return R.snaps[+$(this).data('i')].kind === 'files'; }).first().click(); }
     }, function (e) { $('#rs-snaps').html(alertBox('danger', e)); });
   }
   $('#rs-snaps').on('click', 'button[data-i]', function () {
@@ -213,7 +304,7 @@ window.CWPV = <?= vault_json($cv) ?>;
         '<input type="text" id="rs-confirm" class="form-control" style="max-width:320px" autocomplete="off"></div></div></div>';
     }
     h += '<div class="checkbox"><label><input type="checkbox" id="rs-dry" checked> ' + esc(tt('RS_DRY')) + '</label><p class="help-block">' + esc(tt('RS_DRY_HELP')) + '</p></div>' +
-      '<button type="button" class="btn btn-primary" id="rs-go">' + esc(tt('BTN_RESTORE')) + '</button></div></div>';
+      '<button type="button" class="btn btn-primary" id="rs-go">' + esc(tt('BTN_RESTORE')) + '</button></div></div>' + dlPanel(s);
     $('#rs-panel').html(h);
     if (s.kind === 'files') { browse(''); }
   });
@@ -321,7 +412,82 @@ window.CWPV = <?= vault_json($cv) ?>;
       $('#rs-recent').html(h + '</tbody></table></div>');
     }, function (e) { $('#rs-recent').html(alertBox('danger', e)); });
   }
-  $(document).on('shown.bs.tab', 'a[href="#cv-restore"]', loadJobs);
+  // ---------- Downloads (exports) ----------
+  function dlPanel(s) {
+    if (s.kind === 'meta') { return ''; }
+    return '<div class="panel panel-default"><div class="panel-heading">' + esc(tt('DL_TITLE')) + '</div><div class="panel-body">' +
+      '<div class="alert alert-warning" role="note">' + esc(tt('DL_WARN')) + '</div>' +
+      '<button type="button" class="btn btn-default" id="dl-plain">' + esc(tt('DL_PLAIN')) + '</button> <button type="button" class="btn btn-primary" id="dl-enc">' + esc(tt('DL_ENC')) + '</button>' +
+      '<div id="dl-form" class="cv-dlform cv-mt" style="display:none">' +
+      '<div class="form-group"><label for="dl-pw1">' + esc(tt('DL_PW1')) + '</label><input type="password" id="dl-pw1" class="form-control" autocomplete="new-password" maxlength="256" aria-describedby="dl-help dl-str"></div>' +
+      '<div class="form-group"><label for="dl-pw2">' + esc(tt('DL_PW2')) + '</label><input type="password" id="dl-pw2" class="form-control" autocomplete="new-password" maxlength="256"></div>' +
+      '<p class="help-block" id="dl-help">' + esc(tt('DL_PWHINT')) + '</p><p class="help-block" id="dl-str"></p>' +
+      '<button type="button" class="btn btn-primary" id="dl-go">' + esc(tt('DL_CREATE')) + '</button></div>' +
+      '<div id="dl-out" class="cv-mt" aria-live="polite"></div></div></div>';
+  }
+  function expIn(iso) {
+    var d = (new Date(iso).getTime() - Date.now()) / 1000;
+    return isNaN(d) ? '-' : (d <= 0 ? tt('EXPIRED') : (d < 3600 ? Math.ceil(d / 60) + 'm' : Math.floor(d / 3600) + 'h ' + Math.floor(d % 3600 / 60) + 'm'));
+  }
+  function pwHint() {
+    var p = $('#dl-pw1').val(), n = p.length, c = (/[a-z]/.test(p) ? 1 : 0) + (/[A-Z]/.test(p) ? 1 : 0) + (/\d/.test(p) ? 1 : 0) + (/[^A-Za-z0-9]/.test(p) ? 1 : 0);
+    $('#dl-str').text(n < 12 ? tt('DL_STR_SHORT', {n: n}) : ((n >= 16 && c >= 3) || n >= 24 ? tt('DL_STR_GOOD') : tt('DL_STR_FAIR')));
+  }
+  function dlData() {
+    var s = R.snap, mail = s.kind === 'files' && $('input[name=rs-mode]:checked').val() === 'mail', d = {account: R.account, snapshot: s.id, what: mail ? 'mail' : s.kind};
+    if (mail) {
+      if (!$('#rs-mbx').val() || !$('#rs-dom').val()) { notify(tt('E_TITLE'), tt('DL_NOMAIL'), true); return null; }
+      d.mailbox = $('#rs-mbx').val() + '@' + $('#rs-dom').val();
+    } else if (s.kind === 'db') { d.db = s.db; } else { d.paths = Object.keys(R.sel); }
+    return d;
+  }
+  function dlStart(enc) {
+    var d = dlData(); if (!d) { return; }
+    if (enc) {
+      var p1 = $('#dl-pw1').val(), p2 = $('#dl-pw2').val();
+      if (p1.length < 12) { notify(tt('E_TITLE'), tt('DL_STR_SHORT', {n: p1.length}), true); $('#dl-pw1').focus(); return; }
+      if (p1 !== p2) { notify(tt('E_TITLE'), tt('DL_MISMATCH'), true); $('#dl-pw2').focus(); return; }
+      d.encrypt = '1'; d.password = p1; d.password2 = p2;
+    }
+    $('#dl-plain,#dl-enc,#dl-go').prop('disabled', true);
+    $('#dl-out').html('<span class="cv-spin" aria-hidden="true"></span> ' + esc(tt('DL_PREPARING')));
+    api('export', d, true).then(function (r) { d = null; $('#dl-pw1,#dl-pw2').val(''); pollExport(r.job); },
+      function (e) { d = null; $('#dl-plain,#dl-enc,#dl-go').prop('disabled', false); $('#dl-out').html(alertBox('danger', e)); });
+  }
+  function pollExport(id) {
+    clearTimeout(R.dlPoll);
+    api('job', {id: id}).then(function (j) {
+      var st = j.state || (j.ok ? 'done' : 'failed');
+      if (st === 'queued' || st === 'running') {
+        var pc = Math.max(0, Math.min(100, +j.percent || 0));
+        $('#dl-out').html('<div class="progress" style="max-width:520px"><div class="progress-bar progress-bar-striped active" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pc + '" style="width:' + pc + '%;min-width:2em">' + pc + '%</div></div><p class="text-muted">' + esc(tt('DL_PREPARING')) + '</p>');
+        R.dlPoll = setTimeout(function () { pollExport(id); }, 2000);
+        return;
+      }
+      $('#dl-plain,#dl-enc,#dl-go').prop('disabled', false);
+      if (j.ok && j.download) {
+        $('#dl-out').html('<div class="alert alert-success" role="status"><strong>✔ ' + esc(tt('DL_READY')) + '</strong> ' + esc(j.file || '') + (j.bytes ? ' (' + esc(bytes(j.bytes)) + ')' : '') + '<br><a class="btn btn-success btn-sm cv-mt" href="' + esc(j.download) + '" download>' + esc(tt('DL_LINK')) + '</a>' +
+          '<p class="cv-mt" style="margin-bottom:0">' + esc(tt('DL_EXPIRES', {t: j.expires ? expIn(j.expires) : '24h'})) + (j.encrypted ? ' ' + esc(tt('DL_ENC_NOTE')) : '') + '</p></div>');
+      } else { $('#dl-out').html(alertBox('danger', tt('DL_FAILED') + ' ' + (j.error || ''))); }
+      loadExports();
+    }, function (e) { $('#dl-plain,#dl-enc,#dl-go').prop('disabled', false); $('#dl-out').html(alertBox('danger', e)); });
+  }
+  function loadExports() {
+    api('exports').then(function (list) {
+      var h = '<div class="cv-wrap"><table class="table table-striped"><thead><tr>' + ['TH_FILE', 'TH_ACCOUNT', 'TH_SIZE', 'TH_ENCRYPTED', 'TH_EXPIRES', 'TH_ACTIONS'].map(function (k) { return '<th scope="col">' + esc(tt(k)) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      if (!list.length) { h += '<tr><td colspan="6">' + esc(tt('DL_NORECENT')) + '</td></tr>'; }
+      list.forEach(function (e) {
+        h += '<tr><td>' + esc(e.file) + '</td><td>' + esc(e.account || '') + '</td><td>' + esc(bytes(e.bytes)) + '</td><td>' + esc(tt(e.encrypted ? 'Y_YES' : 'Y_NO')) + '</td><td>' + esc(expIn(e.expires)) + '</td><td>' +
+          (e.download ? '<a class="btn btn-default btn-xs" href="' + esc(e.download) + '" download>' + esc(tt('DL_LINK')) + '</a>' : '') + '</td></tr>';
+      });
+      $('#rs-exports').html(h + '</tbody></table></div>');
+    }, function (e) { $('#rs-exports').html(alertBox('danger', e)); });
+  }
+  $('#rs-panel').on('click', '#dl-enc', function () { $('#dl-form').toggle(); $('#dl-pw1').focus(); pwHint(); })
+    .on('input', '#dl-pw1', pwHint)
+    .on('click', '#dl-go', function () { dlStart(true); })
+    .on('click', '#dl-plain', function () { confirmBox(tt('DL_CF_TITLE'), '<p>' + esc(tt('DL_CF_PLAIN')) + '</p>', tt('DL_PLAIN'), function () { dlStart(false); }); });
+
 
   // ---------- Settings ----------
   var GROUPS = [
@@ -348,8 +514,35 @@ window.CWPV = <?= vault_json($cv) ?>;
       '<div class="form-group"><label for="st-sk">' + esc(tt('F_SECRETKEY')) + '</label><input type="password" id="st-sk" class="form-control" style="max-width:420px" autocomplete="new-password"><p class="help-block">' + esc(tt('H_KEYS')) + '</p></div>' +
       '<button type="button" class="btn btn-warning btn-xs" id="st-savekeys">' + esc(tt('BTN_SAVEKEYS')) + '</button></div>';
   }
+  // Backup schedule: time is SERVER time (cron runs in server time); the browser-time conversion updates live.
+  function schedHtml(sc) {
+    var h = '<div class="panel panel-default"><div class="panel-heading">' + esc(tt('G_SCHEDULE')) + '</div><div class="panel-body">';
+    if (!sc || !sc.backup) { return h + '<p>' + esc(tt('SC_UNAVAILABLE')) + '</p></div></div>'; }
+    var p = String(sc.backup.time || '01:30').split(':');
+    function sel(id, n, v, lbl) {
+      var o = ''; for (var i = 0; i < n; i++) { o += '<option' + (pad2(i) === v ? ' selected' : '') + '>' + pad2(i) + '</option>'; }
+      return '<label for="' + id + '" class="sr-only">' + esc(tt(lbl)) + '</label><select id="' + id + '" class="form-control cv-sch-sel">' + o + '</select>';
+    }
+    function dt(o) { return o ? esc(tt('D_' + o.day)) + ' ' + esc(o.time) : '-'; }
+    return h + '<div class="checkbox"><label><input type="checkbox" id="sc-en"' + (sc.backup.enabled ? ' checked' : '') + '> ' + esc(tt('SC_ENABLE')) + '</label></div>' +
+      '<fieldset class="form-group"><legend style="font-size:14px;border:0;margin-bottom:6px">' + esc(tt('SC_TIME')) + '</legend>' + sel('sc-h', 24, p[0], 'SC_HOUR') + ' : ' + sel('sc-m', 60, p[1], 'SC_MINUTE') + '</fieldset>' +
+      '<p class="help-block">' + L('SC_TZ', {tz: sc.timezone, off: String(sc.utc_offset || '').replace(/^([+-]\d\d)(\d\d)$/, '$1:$2')}) + '</p><p id="sc-conv" role="status"></p>' +
+      '<p class="text-muted">' + esc(tt('G_PRUNE')) + ': ' + dt(sc.prune) + '<br>' + esc(tt('G_CHECK')) + ': ' + dt(sc.check) + '</p>' +
+      '<button type="button" class="btn btn-primary" id="sc-save">' + esc(tt('SC_SAVE')) + '</button></div></div>';
+  }
+  function schedConv() {
+    var sc = S.sched; if (!sc || !sc.backup || !$('#sc-h').length) { return; }
+    var m = /^([+-])(\d\d)(\d\d)$/.exec(sc.utc_offset || '+0000'), off = m ? (m[1] === '-' ? -1 : 1) * (+m[2] * 3600 + +m[3] * 60) : 0;
+    var H = +$('#sc-h').val(), M = +$('#sc-m').val(), now = Math.floor(Date.now() / 1000 + (S.skew || 0));
+    // shortcut: ignores a DST change between now and the next run; fine for a hint, the server stays authoritative
+    var t = Math.floor((now + off) / 86400) * 86400 + H * 3600 + M * 60 - off; if (t <= now) { t += 86400; }
+    var sd = new Date((t + off) * 1000), ld = new Date(t * 1000);
+    var diff = (Date.UTC(ld.getFullYear(), ld.getMonth(), ld.getDate()) - Date.UTC(sd.getUTCFullYear(), sd.getUTCMonth(), sd.getUTCDate())) / 86400000;
+    var ltz = (window.Intl && Intl.DateTimeFormat().resolvedOptions().timeZone) || '';
+    $('#sc-conv').html(L('SC_CONVERT', {t: pad2(H) + ':' + pad2(M), tz: sc.timezone, l: pad2(ld.getHours()) + ':' + pad2(ld.getMinutes()), ltz: ltz, d: diff > 0 ? tt('SC_NEXTDAY') : (diff < 0 ? tt('SC_PREVDAY') : '')}));
+  }
   function loadSettings() {
-    $.when(api('config'), api('secrets'), api('schedule')).then(function (cfg, sec, sch) {
+    $.when(api('config'), api('secrets'), soft(api('schedule'))).then(function (cfg, sec, sch) {
       S.cfg = cfg; S.secrets = sec; S.sched = sch; S.orig = {};
       var h = '<form id="st-form" onsubmit="return false">';
       GROUPS.forEach(function (g) {
@@ -358,10 +551,9 @@ window.CWPV = <?= vault_json($cv) ?>;
         else { g[1].forEach(function (f) { S.orig[f[0]] = f[1] === 'bool' ? (cfg[f[0]] === 'yes' ? 'yes' : 'no') : (cfg[f[0]] == null ? '' : String(cfg[f[0]])); h += field(f, S.orig[f[0]], 'st-'); }); }
         h += '</div></div>';
       });
-      h += '<div class="panel panel-default"><div class="panel-heading">' + esc(tt('G_SCHEDULE')) + '</div><div class="panel-body"><p>' + esc(tt('SCHED_NOTE')) + '</p>' +
-        ((sch.lines || []).length ? '<pre>' + esc(sch.lines.join('\n')) + '</pre>' : '<p>' + esc(tt('SCHED_NONE')) + '</p>') + '</div></div>' +
+      h += schedHtml(sch) +
         '<button type="button" class="btn btn-primary" id="st-save">' + esc(tt('BTN_SAVE')) + '</button> <button type="button" class="btn btn-default" id="st-test">' + esc(tt('BTN_TEST')) + '</button><div id="st-test-out" class="cv-mt" aria-live="polite"></div></form>';
-      $('#cv-settings-body').html(h);
+      $('#cv-settings-body').html(h); schedConv();
     }, function (e) { $('#cv-settings-body').html(alertBox('danger', e)); });
   }
   $('#cv-settings')
@@ -378,7 +570,15 @@ window.CWPV = <?= vault_json($cv) ?>;
       if (!n) { notify(tt('BTN_SAVE'), tt('NOCHANGES'), false); return; }
       api('config_set', {c: c}, true).then(function () { $.extend(S.orig, c); notify(tt('BTN_SAVE'), tt('SAVED'), false); }, function (e) { notify(tt('E_TITLE'), e, true); });
     })
-    .on('click', '#st-test', function () { testStorage($(this), $('#st-test-out')); });
+    .on('click', '#st-test', function () { testStorage($(this), $('#st-test-out')); })
+    .on('change', '#sc-h,#sc-m', schedConv)
+    .on('click', '#sc-save', function () {
+      var b = $(this).prop('disabled', true);
+      api('schedule_set', {time: $('#sc-h').val() + ':' + $('#sc-m').val(), enabled: $('#sc-en').is(':checked') ? 'yes' : 'no'}, true).then(function (sc) {
+        b.prop('disabled', false); S.sched = sc; if (S.status) { S.status.schedule = sc; } if (sc.now_epoch) { S.skew = sc.now_epoch - Date.now() / 1000; }
+        schedConv(); cdTick(); notify(tt('SC_SAVE'), tt('SC_SAVED'), false);
+      }, function (e) { b.prop('disabled', false); notify(tt('E_TITLE'), e, true); });
+    });
   function testStorage(btn, out) {
     btn.prop('disabled', true); out.html('<span class="cv-spin" aria-hidden="true"></span> ' + esc(tt('RS_WORKING')));
     var d = $.Deferred(); // resolves true/false; explicit for the same jQuery reason as api()
@@ -457,7 +657,7 @@ window.CWPV = <?= vault_json($cv) ?>;
   function onTab(t) {
     if (lastTab.t === t && Date.now() - lastTab.at < 500) { return; }
     lastTab = {t: t, at: Date.now()};
-    if (t === '#cv-settings') { loadSettings(); } else if (t === '#cv-logs') { loadLogs().always(logTick); } else { clearTimeout(S.logTimer); }
+    if (t === '#cv-restore') { loadJobs(); loadExports(); } else if (t === '#cv-settings') { loadSettings(); } else if (t === '#cv-logs') { loadLogs().always(logTick); } else { clearTimeout(S.logTimer); }
   }
   $('#cwp-vault a[data-toggle="tab"]')
     .on('shown.bs.tab', function (e) { onTab($(e.target).attr('href')); })
