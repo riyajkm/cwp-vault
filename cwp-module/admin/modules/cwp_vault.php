@@ -102,8 +102,11 @@ window.CWPV = <?= vault_json($cv) ?>;
   }
   function api(acc, data, post) {
     var o = {url: C.url + '&acc=' + acc, dataType: 'json', type: post ? 'POST' : 'GET', data: post ? $.extend({csrf: C.csrf}, data || {}) : (data || {})};
-    return $.ajax(o).then(function (r) { return (r && r.ok) ? r.data : $.Deferred().reject((r && r.error) || tt('E_NET')); },
-      function (x) { var m = x.responseJSON && x.responseJSON.error; return $.Deferred().reject(m || tt('E_NET')); });
+    // Explicit Deferred: on CWP's page .then() may not transform values (old jQuery semantics), so never rely on it.
+    var d = $.Deferred();
+    $.ajax(o).done(function (r) { if (r && r.ok) { d.resolve(r.data); } else { d.reject((r && r.error) || tt('E_NET')); } })
+      .fail(function (x) { var m = x.responseJSON && x.responseJSON.error; d.reject(m || tt('E_NET')); });
+    return d.promise();
   }
   function confirmBox(title, html, label, cb) {
     if (window.bootbox) {
@@ -300,11 +303,13 @@ window.CWPV = <?= vault_json($cv) ?>;
     .on('click', '#st-test', function () { testStorage($(this), $('#st-test-out')); });
   function testStorage(btn, out) {
     btn.prop('disabled', true); out.html('<span class="cv-spin" aria-hidden="true"></span> ' + esc(tt('RS_WORKING')));
-    return api('test_storage', {}, true).then(function (r) {
+    var d = $.Deferred(); // resolves true/false; explicit for the same jQuery reason as api()
+    api('test_storage', {}, true).done(function (r) {
       btn.prop('disabled', false);
       out.html(r.ok ? '<div class="alert alert-success" role="status">✔ ' + L('TEST_OK', {w: r.write_ms, r: r.read_ms, d: r.delete_ms}) + '</div>' : alertBox('danger', '✖ ' + tt('TEST_FAIL') + ' ' + (r.error || '')));
-      return r.ok;
-    }, function (e) { btn.prop('disabled', false); out.html(alertBox('danger', e)); return false; });
+      d.resolve(!!r.ok);
+    }).fail(function (e) { btn.prop('disabled', false); out.html(alertBox('danger', e)); d.resolve(false); });
+    return d.promise();
   }
 
   // ---------- First-run wizard ----------
@@ -368,10 +373,16 @@ window.CWPV = <?= vault_json($cv) ?>;
   function logTick() { clearTimeout(S.logTimer); if ($('#cv-logs').hasClass('active') && $('#lg-auto').is(':checked')) { loadLogs().always(function () { S.logTimer = setTimeout(logTick, 5000); }); } }
   $('#lg-auto').on('change', logTick);
 
-  $('#cwp-vault a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
-    var t = $(e.target).attr('href');
+  // CWP's theme does not always fire Bootstrap's shown.bs.tab, so react to the click as well (once per click).
+  var lastTab = {t: '', at: 0};
+  function onTab(t) {
+    if (lastTab.t === t && Date.now() - lastTab.at < 500) { return; }
+    lastTab = {t: t, at: Date.now()};
     if (t === '#cv-settings') { loadSettings(); } else if (t === '#cv-logs') { loadLogs().always(logTick); } else { clearTimeout(S.logTimer); }
-  });
+  }
+  $('#cwp-vault a[data-toggle="tab"]')
+    .on('shown.bs.tab', function (e) { onTab($(e.target).attr('href')); })
+    .on('click', function () { var t = $(this).attr('href'); setTimeout(function () { onTab(t); }, 50); });
   loadDash();
 })(jQuery);
 </script>
