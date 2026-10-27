@@ -80,8 +80,11 @@ maint_prepare() { # needs --account or --all; takes the global lock exclusively
 }
 
 cmd_prune() {
+  local rc=0
   maint_prepare
-  maint_each prune forget --keep-daily "$KEEP_DAILY" --keep-weekly "$KEEP_WEEKLY" --keep-monthly "$KEEP_MONTHLY" --prune
+  maint_each prune forget --keep-daily "$KEEP_DAILY" --keep-weekly "$KEEP_WEEKLY" --keep-monthly "$KEEP_MONTHLY" --prune || rc=$?
+  if [[ $ARG_ALL == 1 ]]; then orphans_note; fi # report only; "vault orphans --purge" does the purge
+  return "$rc"
 }
 
 cmd_check() {

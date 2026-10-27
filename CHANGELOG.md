@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `vault verify-restore [--account U | --all] [--json]`: automatic restore test (random files restored and
+  size-checked, every database imported into a throwaway database and its table count compared); result in
+  `var/status/verify-<account>.json`, `last_verify` in `vault status --json`, failure alert, monthly cron line.
+- `vault orphans [--json] [--purge [--yes]]` and `ORPHAN_KEEP_DAYS` (default 30, 0 = never purge): list and purge
+  the repositories of deleted accounts; `vault prune --all` reports them.
 - Immutable mode (S3 object lock): config keys `IMMUTABLE`, `LOCK_MODE`, `LOCK_DAYS`; `vault init` refuses a bucket
   without a matching default retention and merges a `cwp-vault-noncurrent` lifecycle rule; needs the `aws` CLI v2.
 - `vault recover (--account U | --all) [--before TIME] [--yes]`: removes the delete markers left by a wipe, then
@@ -16,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `vault status --json` reports `immutable`; admin module shows an "Immutable (MODE, N days)" badge and an
   "Immutable backups" settings group.
 - Docs: "Immutable backups" in `docs/INSTALL.md` (Contabo steps and recovery), engine spec section.
+
+### Changed
+
+- `vault recover` removes delete markers with `delete-objects` batches of up to 1000 instead of one call each; output is unchanged.
 
 ## [0.2.0] - 2026-10-28
 

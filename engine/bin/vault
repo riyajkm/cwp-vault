@@ -37,9 +37,13 @@ source "$VAULT_LIB/storage.sh"
 source "$VAULT_LIB/admin.sh"
 # shellcheck source=../lib/immutable.sh
 source "$VAULT_LIB/immutable.sh"
+# shellcheck source=../lib/orphans.sh
+source "$VAULT_LIB/orphans.sh"
+# shellcheck source=../lib/verify.sh
+source "$VAULT_LIB/verify.sh"
 
 ARG_ACCOUNT='' ARG_ALL=0 ARG_DRY=0 ARG_JSON=0 ARG_SNAPSHOT=latest ARG_WHAT=''
-ARG_DB='' ARG_TARGET='' ARG_TARGET_DB='' ARG_TAIL='' ARG_QUIET=0 ARG_BEFORE='' ARG_YES=0
+ARG_DB='' ARG_TARGET='' ARG_TARGET_DB='' ARG_TAIL='' ARG_QUIET=0 ARG_BEFORE='' ARG_YES=0 ARG_PURGE=0
 declare -a ARG_POS=() ARG_PATHS=()
 VAULT_CMD=''
 
@@ -73,6 +77,21 @@ when given). Nothing changes without --yes; with it the markers are removed, the
 and restic check run on each repository.
 EOF
       ;;
+    verify-restore) cat <<'EOF'
+vault verify-restore [--account U | --all] [--json]
+Restore test. For each account (one random account when neither flag is given): restores up to 20 random files of
+the latest files snapshot into a throwaway directory and compares their sizes, and imports the latest dump of every
+database into a throwaway database and compares the table count. Both are removed afterwards. The result goes to
+var/status/verify-<account>.json; a failure sends the usual alert and exits 1.
+EOF
+      ;;
+    orphans) cat <<'EOF'
+vault orphans [--json] [--purge [--yes]]
+Lists the repositories of accounts that no longer exist in CWP, with their newest snapshot. --purge shows which
+are older than ORPHAN_KEEP_DAYS; with --yes it runs "restic forget --keep-within <N>d --prune" on them.
+Needs the aws CLI to list the repositories.
+EOF
+      ;;
     status) echo "vault status [--json]" ;;
     test-storage) echo "vault test-storage [--json]     write, read back and delete a probe snapshot" ;;
     verify-secrets) echo "vault verify-secrets           check that every repository opens with the current password" ;;
@@ -83,7 +102,7 @@ EOF
     *) cat <<'EOF'
 Usage: vault <command> [options]   (vault <command> --help for details)
 Commands: init backup restore snapshots ls prune check unlock recover status
-          test-storage verify-secrets config secrets log version
+          verify-restore orphans test-storage verify-secrets config secrets log version
 Exit codes: 0 ok, 1 some accounts failed, 2 config/usage error, 3 already running, 4 storage unreachable
 EOF
       ;;
@@ -117,6 +136,7 @@ args_parse() {
       dry-run) ARG_DRY=1 ;;
       yes) ARG_YES=1 ;;
       json) ARG_JSON=1 ;;
+      purge) ARG_PURGE=1 ;;
       quiet) ARG_QUIET=1 ;;
       account | snapshot | what | path | db | target | target-db | tail | before)
         if ((!has)); then
@@ -145,6 +165,7 @@ args_parse() {
 # shellcheck disable=SC2329 # invoked through trap
 cleanup() {
   local fd
+  verify_cleanup
   for fd in "${LOCK_FDS[@]}"; do exec {fd}>&- 2>/dev/null || true; done
   run_unregister
 }
@@ -169,7 +190,7 @@ main() {
   case $cmd in
     '' | -h | --help | help) help_text; exit 0 ;;
     version | --version) echo "cwp-vault $VAULT_VERSION"; exit 0 ;;
-    init | backup | restore | snapshots | ls | prune | check | unlock | recover | status | test-storage | verify-secrets | config | secrets | log) ;;
+    init | backup | restore | snapshots | ls | prune | check | unlock | recover | verify-restore | orphans | status | test-storage | verify-secrets | config | secrets | log) ;;
     *) VAULT_CMD=''; usage_err "unknown command: $cmd" ;;
   esac
   for a in "$@"; do
@@ -185,6 +206,8 @@ main() {
     ls) args_parse "account snapshot path json" "$@" ;;
     prune | check | unlock) args_parse "account all" "$@" ;;
     recover) args_parse "account all before yes json" "$@" ;;
+    verify-restore) args_parse "account all json" "$@" ;;
+    orphans) args_parse "json purge yes" "$@" ;;
     status | test-storage) args_parse "json" "$@" ;;
     config | secrets) args_parse "json pos" "$@" ;; # sub-command and KEY=VALUE pairs
     log) args_parse "tail json" "$@" ;;
@@ -217,6 +240,8 @@ main() {
     check) with_alerts cmd_check || rc=$? ;;
     unlock) cmd_unlock || rc=$? ;;
     recover) cmd_recover || rc=$? ;;
+    verify-restore) verify_with_alert || rc=$? ;;
+    orphans) cmd_orphans || rc=$? ;;
     test-storage) cmd_test_storage || rc=$? ;;
     verify-secrets) cmd_verify_secrets || rc=$? ;;
     *) ;;
