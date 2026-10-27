@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `var/status/verify-<account>.json`, `last_verify` in `vault status --json`, failure alert, monthly cron line.
 - `vault orphans [--json] [--purge [--yes]]` and `ORPHAN_KEEP_DAYS` (default 30, 0 = never purge): list and purge
   the repositories of deleted accounts; `vault prune --all` reports them.
+- Installer: restic `SHA256SUMS` is verified with gpg against the pinned release key fingerprint (temporary 0700
+  GNUPGHOME) on top of the pinned per-arch SHA-256; missing gpg warns, `--strict` fails.
+- Installer: `--upgrade` (engine, module, missing cron lines merged without touching existing lines or the backup
+  line's state; prints old -> new; refuses downgrades without `--force`; version kept in
+  `/usr/local/cwp-vault/VERSION`) and `--check` (read-only health report, non-zero on problems).
+- Monthly `vault verify-restore --quiet` cron line in the shipped cron file; `tests/installer.bats`.
+
 - Immutable mode (S3 object lock): config keys `IMMUTABLE`, `LOCK_MODE`, `LOCK_DAYS`; `vault init` refuses a bucket
   without a matching default retention and merges a `cwp-vault-noncurrent` lifecycle rule; needs the `aws` CLI v2.
 - `vault recover (--account U | --all) [--before TIME] [--yes]`: removes the delete markers left by a wipe, then
