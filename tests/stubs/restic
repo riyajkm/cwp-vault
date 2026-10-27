@@ -3,11 +3,14 @@
 # Test stub for restic. Logs "<repo> | <argv>" to $STUB_LOG/restic.log and saves --stdin data.
 # Knobs (env): STUB_NOREPO=1 (cat config -> 10), STUB_CAT_RC=N (cat config -> N),
 # STUB_FAIL_FILES=1 (file backup fails, leaks secrets on stderr), STUB_STREAM_FAIL="<stdin-filename> ..."
+# verify-restore: STUB_VERIFY_BAD=1 (restored files get the wrong size), STUB_VERIFY_MISSING=1 (restored files are not written),
+# STUB_LS_FAIL=1 (ls fails). orphans: STUB_SNAP_DAY=YYYY-MM-DD (day of every snapshot time, default 2026-01-01).
 mkdir -p "$STUB_LOG/stdin"
 printf '%s | %s\n' "${RESTIC_REPOSITORY:-}" "$*" >>"$STUB_LOG/restic.log"
 printf 'pw_in_env=%s key_in_env=%s fps=%s\n' "${RESTIC_PASSWORD:+yes}" "${AWS_ACCESS_KEY_ID:+yes}" "${RESTIC_PROGRESS_FPS:-}" >>"$STUB_LOG/restic.env.log"
 args=("$@")
 sub='' fname='' stdin=0 target='' i=0
+declare -a incs=()
 while ((i < ${#args[@]})); do
   a=${args[i]}
   case $a in
@@ -15,6 +18,7 @@ while ((i < ${#args[@]})); do
     --stdin) stdin=1 ;;
     --stdin-filename) fname=${args[i + 1]} ;;
     --target) target=${args[i + 1]} ;;
+    --include=*) incs+=("${a#--include=}") ;;
     -*) ;;
     *) [[ -n $sub ]] || sub=$a ;;
   esac
@@ -45,6 +49,13 @@ case $sub in
   restore)
     if [[ -n ${STUB_RESTORE_FAIL:-} ]]; then echo "Fatal: restore failed" >&2; exit 1; fi
     mkdir -p "$target"
+    for p in "${incs[@]}"; do
+      [[ -z ${STUB_VERIFY_MISSING:-} ]] || continue
+      case ${p##*/} in index.php) sz=12 ;; deep.txt) sz=3 ;; *) sz=1 ;; esac
+      if [[ -n ${STUB_VERIFY_BAD:-} ]]; then sz=$((sz + 1)); fi
+      mkdir -p "$target${p%/*}"
+      head -c "$sz" /dev/zero | tr '\0' x >"$target$p"
+    done
     echo data >"$target/restored.txt"
     echo data >"$target/suid.bin"
     chmod 4755 "$target/suid.bin" 2>/dev/null || true ;;
@@ -53,13 +64,14 @@ case $sub in
     if [[ ${args[*]} == */probe/probe.txt* ]]; then cat "$STUB_LOG/last_stdin"; exit 0; fi
     printf 'CREATE TABLE t (id int);\nCREATE DEFINER=`root`@`localhost` PROCEDURE p() BEGIN END;\n' ;;
   snapshots)
-    cat <<'JSON'
+    sed "s/2026-01-01/${STUB_SNAP_DAY:-2026-01-01}/g" <<'JSON'
 [{"id":"aaaaaaaa11112222333344445555666677778888999900001111222233334444","short_id":"aaaaaaaa","time":"2026-01-01T01:30:00Z","tags":["files","alice"],"paths":["/home/alice"],"summary":{"total_bytes_processed":1000}},
  {"id":"bbbbbbbb11112222333344445555666677778888999900001111222233334444","short_id":"bbbbbbbb","time":"2026-01-01T01:31:00Z","tags":["db","alice","db:alice_wp"],"paths":[],"summary":null},
  {"id":"cccccccc11112222333344445555666677778888999900001111222233334444","short_id":"cccccccc","time":"2026-01-01T01:32:00Z","tags":["meta","alice"],"paths":["/meta/account.json"]}]
 JSON
     ;;
   ls)
+    if [[ -n ${STUB_LS_FAIL:-} ]]; then echo "Fatal: no snapshot found" >&2; exit 1; fi
     cat <<'JSON'
 {"message_type":"snapshot","id":"aaaaaaaa"}
 {"name":"alice","type":"dir","path":"/home/alice","mtime":"2026-01-01T00:00:00Z"}

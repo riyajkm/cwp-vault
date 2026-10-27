@@ -4,7 +4,7 @@ load helpers/common
 setup() {
   vault_setup
   need_python
-  unset STUB_LOCK_MISSING STUB_LOCK_ENABLED STUB_LOCK_MODE STUB_LOCK_DAYS STUB_LIFECYCLE_FILE STUB_DELETE_FAIL
+  unset STUB_LOCK_MISSING STUB_LOCK_ENABLED STUB_LOCK_MODE STUB_LOCK_DAYS STUB_LIFECYCLE_FILE STUB_DELETE_FAIL STUB_DELETE_ERRORS STUB_MARKERS
   export STUB_LOG
 }
 teardown() { vault_teardown; }
@@ -121,7 +121,7 @@ JSON
   [[ $output == *"alice: 3 delete markers, removed 0"* ]]
   [[ $output == *"bob: 0 delete markers"* ]]
   [[ $output == *"Dry run"* ]]
-  ! aws_log | grep -q delete-object
+  ! aws_log | grep -q delete-objects
   [ ! -e "$STUB_LOG/restic.log" ]
   aws_log | grep -q -- '--prefix srv1/vault/alice/'
 }
@@ -144,8 +144,10 @@ JSON
   [ "$(printf '%s' "$output" | jget 'd["ok"]')" = True ]
   [ "$(printf '%s' "$output" | jget 'd["accounts"][0]["removed"]')" -eq 3 ]
   [ "$(printf '%s' "$output" | jget 'd["accounts"][0]["check"]')" = ok ]
-  [ "$(count_lines delete-object "$STUB_LOG/aws.log")" -eq 3 ]
-  aws_log | grep -q -- '--key srv1/vault/alice/locks/bb --version-id m2'
+  [ "$(count_lines delete-objects "$STUB_LOG/aws.log")" -eq 1 ]
+  ! aws_log | grep -q 'delete-object --'
+  grep -q '"Quiet":true' "$STUB_LOG/aws.delete.json"
+  grep -q '{"Key":"srv1/vault/alice/locks/bb","VersionId":"m2"}' "$STUB_LOG/aws.delete.json"
   local u c
   u=$(grep -n 'vault/alice | .*unlock --remove-all' "$STUB_LOG/restic.log" | head -n1 | cut -d: -f1)
   c=$(grep -n 'vault/alice | .*check' "$STUB_LOG/restic.log" | head -n1 | cut -d: -f1)
@@ -160,6 +162,29 @@ JSON
   [ "$status" -eq 1 ]
   [ "$(printf '%s' "$output" | jget 'd["ok"]')" = False ]
   [ "$(printf '%s' "$output" | jget 'd["accounts"][0]["removed"]')" -eq 0 ]
+  [ ! -e "$STUB_LOG/restic.log" ]
+}
+
+@test "recover --yes removes markers in batches of at most 1000" {
+  need_python
+  conf_with IMMUTABLE=yes
+  STUB_MARKERS=2497 run vout recover --account alice --yes --json
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jget 'd["accounts"][0]["delete_markers"]')" -eq 2500 ]
+  [ "$(printf '%s' "$output" | jget 'd["accounts"][0]["removed"]')" -eq 2500 ]
+  [ "$(count_lines delete-objects "$STUB_LOG/aws.log")" -eq 3 ]
+  [ "$(grep -o '"VersionId"' "$STUB_LOG/aws.delete.json" | wc -l)" -eq 2500 ]
+  [ "$(grep -c '^{"Objects"' "$STUB_LOG/aws.delete.json")" -eq 3 ]
+}
+
+@test "recover --yes fails when S3 reports errors in the delete-objects answer" {
+  need_python
+  conf_with IMMUTABLE=yes
+  STUB_DELETE_ERRORS=1 run vout recover --account alice --yes --json
+  [ "$status" -eq 1 ]
+  [ "$(printf '%s' "$output" | jget 'd["ok"]')" = False ]
+  [ "$(printf '%s' "$output" | jget 'd["accounts"][0]["removed"]')" -eq 2 ]
+  [ "$(printf '%s' "$output" | jget 'd["accounts"][0]["check"]')" = skipped ]
   [ ! -e "$STUB_LOG/restic.log" ]
 }
 

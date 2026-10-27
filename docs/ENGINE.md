@@ -42,6 +42,7 @@ All paths come from `VAULT_HOME` (default `/usr/local/cwp-vault`) so tests can p
 | `LOCK_MODE` | `COMPLIANCE` | `COMPLIANCE` or `GOVERNANCE`; must equal the bucket's default retention mode |
 | `LOCK_DAYS` | `14` | 1-3650; the bucket's default retention must be at least this many days |
 | `EXPORT_KEEP_HOURS` | `24` | 1-720; how long a download made by `vault export` is kept before `vault export-clean` deletes it |
+| `ORPHAN_KEEP_DAYS` | `30` | `vault orphans --purge` only touches repositories of deleted accounts whose newest snapshot is older than this; `0` = never purge |
 
 Unknown keys → warning. Values are validated (bucket/endpoint/prefix charset, numbers, yes/no).
 Default excludes: `*/cache/*`, `*/.cache/*`, `*/tmp/*`, `*/.trash/*`, `*/error_log`, `*/core.[0-9]*`.
@@ -96,6 +97,8 @@ vault prune [--account U|--all]  # forget --keep-* --prune
 vault check [--account U|--all]  # check --read-data-subset
 vault unlock [--account U|--all] # restic unlock (stale locks only)
 vault recover (--account U|--all) [--before ISO8601] [--yes] [--json]   # immutable mode only
+vault verify-restore [--account U|--all] [--json]   # restore test: random files + every database
+vault orphans [--json] [--purge [--yes]]            # repositories of deleted accounts
 vault status [--json]            # summary of var/status/*.json
 vault test-storage               # write → read → delete a probe snapshot in _server; reports timing
 vault version
@@ -123,6 +126,7 @@ into a new `--target-db`. Writing into the live account needs `--in-place` (see 
 0  4 * * 0  root /usr/local/bin/vault prune --all
 0  4 * * 3  root /usr/local/bin/vault check --all
 7  * * * *  root /usr/local/bin/vault export-clean --quiet
+0 5 1 * * root /usr/local/bin/vault verify-restore --quiet
 ```
 
 ## Admin module ↔ engine contract
@@ -143,6 +147,8 @@ Every read command supports `--json` and prints one JSON document to stdout; err
 | `vault secrets status --json` | `{"s3_key_set":bool,"access_key_hint":"…abcd","password_set":bool}` — never the values |
 | `vault log --tail N [--json]` | last N log lines (secrets already filtered) |
 | `vault test-storage --json` | `{"ok":bool,"write_ms","read_ms","delete_ms","error"}` |
+| `vault verify-restore [--account U\|--all] --json` | one account (or none given: one random account): `{"ok","account","finished","files_checked","files_ok","dbs":[{"db","tables_expected","tables_restored","ok"}],"duration_s","error"}`; with `--all` an array of those. Also written to `var/status/verify-<account>.json` |
+| `vault orphans --json` | `{"ok","keep_days","immutable","orphans":[{"account","last_snapshot":null\|"ISO","age_days","purge_due","purged","error"}],"error","note"}` |
 | `vault restore … --json` | `{"ok","job","target","files","bytes","duration_s","error"}`; also written to `var/status/restore-<job>.json` |
 
 Long-running verbs (`backup`, `prune`, `check`) are started by the module detached:
@@ -213,8 +219,43 @@ Design and test results: `docs/research/immutable.md`. Needs the `aws` CLI v2 an
   and `restic check` per repository. It refuses unless `IMMUTABLE=yes`, holds the global exclusive lock and appends
   a line to `var/log/audit.log`. A marker that cannot be removed stops that account and skips its check.
   JSON: `{"ok":bool,"accounts":[{"account","delete_markers","removed","check":"ok|failed|skipped"}],"error":"…"}`.
-  It deletes one marker per `aws` call; a wipe of a very large repository takes a while.
+  Markers are removed with `aws s3api delete-objects` in batches of up to 1000 (`Quiet`); the `Errors` array of every answer is checked.
 - `vault status --json` has a top-level `"immutable":{"enabled":bool,"mode":"…","days":N}`.
+
+## Restore test (`vault verify-restore`)
+
+Proves that the backups can be restored, without touching live data. Per account (`--account U`, `--all`, or one
+random account when neither is given):
+
+1. Files: up to 20 random regular files of the latest files snapshot (`restic ls --json`, sampled with `shuf`;
+   paths containing a backslash are skipped) are restored with `restic restore --verify --include …` into a fresh
+   `0700` directory `$RESTORE_ROOT/verify-<timestamp>.XXXXXX`; the sizes are compared with the snapshot listing;
+   the directory is deleted.
+2. Databases: the latest dump of each database is piped (DEFINER stripped) into a throwaway database
+   `cwpvault_verify_<8 hex>`. The import must succeed and the number of tables (`BASE TABLE`) must equal the number of
+   `CREATE TABLE` lines in a second, streamed `restic dump` of the same snapshot. The database is dropped.
+
+The throwaway database and directory are removed by the exit trap (also on error, SIGTERM or SIGINT). The result is
+written to `var/status/verify-<account>.json` and summarised in `vault status --json` as
+`"last_verify":{"finished","ok","account"}` (`null` before the first run). A failure exits 1 and sends the usual
+email/webhook alert (no heartbeat ping). It takes the shared global lock and the account lock and honours
+`MIN_FREE_GB`. Cron runs it on the 1st of each month at 05:00.
+
+## Deleted accounts (`vault orphans`)
+
+An orphan is a repository under `${S3_PREFIX}vault/` (never `_server`) whose account is no longer in
+`root_cwp.user` (all CWP accounts count, also those excluded by `EXCLUDE_ACCOUNTS`). The repositories are listed with
+`aws s3api list-objects-v2 --delimiter /`; without the `aws` CLI the check is skipped with a warning. An empty CWP
+account list is an error, never "everything is an orphan".
+
+- `vault orphans` lists orphans with the time of their newest snapshot.
+- `vault orphans --purge` shows which ones are due (newest snapshot older than `ORPHAN_KEEP_DAYS`); with `--yes` it
+  runs `restic forget --keep-within <ORPHAN_KEEP_DAYS>d --prune` on those. restic measures `--keep-within` back from
+  the repository's newest snapshot, so the newest history stays; the repository config and keys are never deleted.
+  Each purge is appended to `var/log/audit.log`. `ORPHAN_KEEP_DAYS=0` disables purging.
+- In immutable mode the pruned objects stay in the bucket until their object lock and the
+  `cwp-vault-noncurrent` lifecycle rule expire (about `LOCK_DAYS + 7` days); the output says so.
+- `vault prune --all` also reports orphans (log and, unless `--quiet`, stdout). It never purges.
 
 ## Security rules (from the v0.2 threat review)
 

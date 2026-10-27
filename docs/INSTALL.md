@@ -12,8 +12,9 @@
 - `curl`, `bzip2`, `sha256sum`, `mysql`, `mysqldump`, `flock`, `setsid`, `timeout` (all standard on CWP servers).
 - An S3-compatible bucket (endpoint, bucket name, access key and secret key).
 - restic 0.17.0 or newer. If it is missing or older, the installer downloads a pinned version
-  (0.19.1, x86_64 or aarch64) and checks it against a SHA-256 hash stored in `install.sh`.
-  GPG verification is planned for v0.3.
+  (0.19.1, x86_64 or aarch64), checks the signature on restic's `SHA256SUMS` (see
+  [restic signature](#restic-signature)) and then the download against a SHA-256 hash stored in `install.sh`.
+- `gpg` (optional but recommended) for the signature check; without it the installer warns, or fails with `--strict`.
 
 ## Install
 
@@ -38,7 +39,7 @@ cd cwp-vault-<version>
 sudo ./install.sh
 ```
 
-Options: `--dry-run`, `--enable-cron`, `--force`, `--no-module` (engine only), `--version`.
+Options: `--dry-run`, `--enable-cron`, `--force`, `--no-module` (engine only), `--upgrade`, `--check`, `--strict`, `--version`.
 
 What it does: installs restic if needed; copies the engine to `/usr/local/cwp-vault` and links
 `/usr/local/bin/vault`; creates `etc/` and `var/` with locked-down permissions; installs the CWP module and
@@ -106,11 +107,44 @@ Use `--before` with the time just before the attack so legitimate prunes are not
 who simply waits longer than `LOCK_DAYS` while silently breaking your backups: keep the heartbeat URL and the
 monthly test restore on.
 
+## Restic signature
+
+When the installer has to download restic, it does not rely on the pinned SHA-256 alone. It also fetches
+`SHA256SUMS` and `SHA256SUMS.asc` for the pinned release and the restic signing key
+(`https://restic.net/gpg-key-alex.asc`), imports the key into a temporary `0700` GNUPGHOME, and refuses to go on
+unless the key carries the fingerprint pinned in `install.sh` (`CF8F 18F2 8445 7597 3F79 D4E1 91A6 868B D3F7 A907`,
+see restic's installation docs) and the signature is valid for exactly that key. The signed list must also contain
+the same hash as the pinned one. A bad signature always stops the install. If `gpg` is missing (or the signature
+files cannot be downloaded) the installer warns and continues with the pinned SHA-256, which is still verified;
+`--strict` turns that warning into a failure. An already installed restic (0.17.0 or newer) is kept and not checked.
+
 ## Upgrade
 
-Fetch the new version (`git pull` or a new tarball) and run `sudo ./install.sh` again. Engine files and the
-module are replaced; config, secrets, logs and an existing cron file are kept. Use `--enable-cron` only if you
-want the backup line switched on in an existing cron file.
+Fetch the new version (`git pull` or a new tarball) and run:
+
+```
+sudo ./install.sh --upgrade --dry-run     # preview
+sudo ./install.sh --upgrade
+```
+
+It replaces the engine (`bin/`, `lib/`) and the CWP module (through `fix-menu`, immutable flags restored as found),
+refreshes logrotate, and appends cron lines the shipped file has and yours lacks (for example the monthly
+`vault verify-restore --quiet`). Existing cron lines are not changed, and a backup line you left disabled (or
+enabled) keeps its state. Config, secrets and logs are kept. It prints `old -> new`, records the version in
+`/usr/local/cwp-vault/VERSION`, and refuses to downgrade unless you add `--force`. An install made with
+`--no-module` stays engine-only. A plain `sudo ./install.sh` on an existing install still works as before.
+
+## Check
+
+```
+sudo ./install.sh --check
+```
+
+A read-only report; it changes nothing and never prints config or secret values. It checks: restic version, vault
+version and the `/usr/local/bin/vault` link, `vault.conf` and `secrets.env` present (secrets non-empty, mode 600),
+the nightly backup cron line enabled, module files and the menu line in place, and the last backup result per
+account from `vault status --json`. Each line starts with `ok` or `FAIL`; the exit code is 1 if anything failed
+(including a still-disabled backup cron line, so do not use it before `vault init`), otherwise 0.
 
 ## Uninstall
 

@@ -76,7 +76,7 @@ cmd_status() {
   local -a files=() names=()
   for f in "$VAULT_STATUS"/*.json; do
     [[ -e $f ]] || continue
-    case ${f##*/} in restore-*) continue ;; esac
+    case ${f##*/} in restore-* | verify-*) continue ;; esac
     files+=("$f")
   done
   if [[ -f $VAULT_CONF && -f $VAULT_SECRETS ]] && (cfg_load) >/dev/null 2>&1; then configured=true; fi
@@ -96,7 +96,8 @@ cmd_status() {
     done
     printf '],"server":'
     if [[ -f $VAULT_STATUS/_server.json ]]; then status_obj "$VAULT_STATUS/_server.json"; else printf 'null'; fi
-    printf ',"running":[%s],"immutable":%s,"now_epoch":%d,"schedule":%s}\n' "$(status_running)" "$(imm_status_json)" "$(date +%s)" "$(sch_json)"
+    printf ',"running":[%s],"immutable":%s,"last_verify":%s,"now_epoch":%d,"schedule":%s}
+' "$(status_running)" "$(imm_status_json)" "$(status_last_verify)" "$(date +%s)" "$(sch_json)"
     return 0
   fi
   if ((${#files[@]} == 0)); then
