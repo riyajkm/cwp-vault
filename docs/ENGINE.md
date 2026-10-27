@@ -38,6 +38,9 @@ All paths come from `VAULT_HOME` (default `/usr/local/cwp-vault`) so tests can p
 | `ALERT_WEBHOOK` | `` | POST JSON on failure |
 | `HEARTBEAT_URL` | `` | healthchecks-style: `/start`, success, `/fail` |
 | `RETRIES` | `3` | retries for a failed restic call, backoff 30 s, 120 s, 300 s |
+| `IMMUTABLE` | `no` | `yes` turns on immutable (object lock) mode; see "Immutable mode" below |
+| `LOCK_MODE` | `COMPLIANCE` | `COMPLIANCE` or `GOVERNANCE`; must equal the bucket's default retention mode |
+| `LOCK_DAYS` | `14` | 1-3650; the bucket's default retention must be at least this many days |
 
 Unknown keys → warning. Values are validated (bucket/endpoint/prefix charset, numbers, yes/no).
 Default excludes: `*/cache/*`, `*/.cache/*`, `*/tmp/*`, `*/.trash/*`, `*/error_log`, `*/core.[0-9]*`.
@@ -81,6 +84,7 @@ vault snapshots --account U      # list (JSON with --json)
 vault prune [--account U|--all]  # forget --keep-* --prune
 vault check [--account U|--all]  # check --read-data-subset
 vault unlock [--account U|--all] # restic unlock (stale locks only)
+vault recover (--account U|--all) [--before ISO8601] [--yes] [--json]   # immutable mode only
 vault status [--json]            # summary of var/status/*.json
 vault test-storage               # write → read → delete a probe snapshot in _server; reports timing
 vault version
@@ -132,6 +136,24 @@ Every read command supports `--json` and prints one JSON document to stdout; err
 
 Long-running verbs (`backup`, `restore`, `prune`, `check`) are started by the module detached:
 `setsid -f /usr/local/bin/vault <verb> … --quiet`; the module then polls `status --json` / `log --tail`.
+
+## Immutable mode (v0.3)
+
+Design and test results: `docs/research/immutable.md`. Needs the `aws` CLI v2 and `python3` on the server
+(restic cannot read bucket settings). Exit 2 with a clear message when either is missing.
+
+- `vault init` with `IMMUTABLE=yes` first runs `aws s3api get-object-lock-configuration`; it refuses (exit 2)
+  unless `ObjectLockEnabled=Enabled`, the default retention mode equals `LOCK_MODE` and its days are at least
+  `LOCK_DAYS`. It then merges the lifecycle rule `cwp-vault-noncurrent` (`NoncurrentVersionExpiration` of
+  `LOCK_DAYS + 7` days, prefix `${S3_PREFIX}vault/`) into the bucket's rules: other rules are kept, only our own
+  ID is replaced, and nothing is written when it is already there.
+- `vault recover` lists the delete markers under each account repository prefix (those newer than `--before`).
+  It is a dry run unless `--yes`, which deletes each marker by version id, then runs `restic unlock --remove-all`
+  and `restic check` per repository. It refuses unless `IMMUTABLE=yes`, holds the global exclusive lock and appends
+  a line to `var/log/audit.log`. A marker that cannot be removed stops that account and skips its check.
+  JSON: `{"ok":bool,"accounts":[{"account","delete_markers","removed","check":"ok|failed|skipped"}],"error":"…"}`.
+  It deletes one marker per `aws` call; a wipe of a very large repository takes a while.
+- `vault status --json` has a top-level `"immutable":{"enabled":bool,"mode":"…","days":N}`.
 
 ## Security rules (from the v0.2 threat review)
 

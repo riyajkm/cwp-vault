@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Immutable mode (S3 object lock): config keys `IMMUTABLE`, `LOCK_MODE`, `LOCK_DAYS`; `vault init` refuses a bucket
+  without a matching default retention and merges a `cwp-vault-noncurrent` lifecycle rule; needs the `aws` CLI v2.
+- `vault recover (--account U | --all) [--before TIME] [--yes]`: removes the delete markers left by a wipe, then
+  unlocks and checks each repository. Dry run by default.
+- `vault status --json` reports `immutable`; admin module shows an "Immutable (MODE, N days)" badge and an
+  "Immutable backups" settings group.
+- Docs: "Immutable backups" in `docs/INSTALL.md` (Contabo steps and recovery), engine spec section.
+
 ## [0.2.0] - 2026-10-28
 
 ### Added

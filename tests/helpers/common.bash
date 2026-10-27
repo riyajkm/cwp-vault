@@ -26,7 +26,7 @@ vault_setup() {
   export STUB_LOG=$T/stublog
   mkdir -p "$VAULT_HOME/etc" "$T/home/alice" "$T/home/bob" "$T/vmail/example.com" "$T/vmail/example.org" "$STUB_LOG" "$T/bin"
   local s
-  for s in restic mysql mysqldump sendmail curl; do
+  for s in restic mysql mysqldump sendmail curl aws; do
     cp "$REPO_ROOT/tests/stubs/$s" "$T/bin/$s"
     chmod +x "$T/bin/$s"
   done

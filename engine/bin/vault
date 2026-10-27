@@ -35,9 +35,11 @@ source "$VAULT_LIB/restore.sh"
 source "$VAULT_LIB/storage.sh"
 # shellcheck source=../lib/admin.sh
 source "$VAULT_LIB/admin.sh"
+# shellcheck source=../lib/immutable.sh
+source "$VAULT_LIB/immutable.sh"
 
 ARG_ACCOUNT='' ARG_ALL=0 ARG_DRY=0 ARG_JSON=0 ARG_SNAPSHOT=latest ARG_WHAT=''
-ARG_DB='' ARG_TARGET='' ARG_TARGET_DB='' ARG_TAIL='' ARG_QUIET=0
+ARG_DB='' ARG_TARGET='' ARG_TARGET_DB='' ARG_TAIL='' ARG_QUIET=0 ARG_BEFORE='' ARG_YES=0
 declare -a ARG_POS=() ARG_PATHS=()
 VAULT_CMD=''
 
@@ -64,6 +66,13 @@ EOF
     prune) echo "vault prune --account U | --all [--quiet]" ;;
     check) echo "vault check --account U | --all [--quiet]" ;;
     unlock) echo "vault unlock --account U | --all" ;;
+    recover) cat <<'EOF'
+vault recover --account U | --all [--before ISO8601] [--yes] [--json]
+Immutable mode only. Lists the delete markers a wipe left in the account repositories (newer than --before
+when given). Nothing changes without --yes; with it the markers are removed, then restic unlock --remove-all
+and restic check run on each repository.
+EOF
+      ;;
     status) echo "vault status [--json]" ;;
     test-storage) echo "vault test-storage [--json]     write, read back and delete a probe snapshot" ;;
     verify-secrets) echo "vault verify-secrets           check that every repository opens with the current password" ;;
@@ -73,7 +82,7 @@ EOF
     version) echo "vault version" ;;
     *) cat <<'EOF'
 Usage: vault <command> [options]   (vault <command> --help for details)
-Commands: init backup restore snapshots ls prune check unlock status
+Commands: init backup restore snapshots ls prune check unlock recover status
           test-storage verify-secrets config secrets log version
 Exit codes: 0 ok, 1 some accounts failed, 2 config/usage error, 3 already running, 4 storage unreachable
 EOF
@@ -106,9 +115,10 @@ args_parse() {
     case $name in
       all) ARG_ALL=1 ;;
       dry-run) ARG_DRY=1 ;;
+      yes) ARG_YES=1 ;;
       json) ARG_JSON=1 ;;
       quiet) ARG_QUIET=1 ;;
-      account | snapshot | what | path | db | target | target-db | tail)
+      account | snapshot | what | path | db | target | target-db | tail | before)
         if ((!has)); then
           (($# > 0)) || usage_err "$opt needs a value"
           val=$1
@@ -123,6 +133,7 @@ args_parse() {
           target) ARG_TARGET=$val ;;
           target-db) ARG_TARGET_DB=$val ;;
           tail) ARG_TAIL=$val ;;
+          before) ARG_BEFORE=$val ;;
           *) ;;
         esac
         ;;
@@ -158,7 +169,7 @@ main() {
   case $cmd in
     '' | -h | --help | help) help_text; exit 0 ;;
     version | --version) echo "cwp-vault $VAULT_VERSION"; exit 0 ;;
-    init | backup | restore | snapshots | ls | prune | check | unlock | status | test-storage | verify-secrets | config | secrets | log) ;;
+    init | backup | restore | snapshots | ls | prune | check | unlock | recover | status | test-storage | verify-secrets | config | secrets | log) ;;
     *) VAULT_CMD=''; usage_err "unknown command: $cmd" ;;
   esac
   for a in "$@"; do
@@ -173,6 +184,7 @@ main() {
     snapshots) args_parse "account json" "$@" ;;
     ls) args_parse "account snapshot path json" "$@" ;;
     prune | check | unlock) args_parse "account all" "$@" ;;
+    recover) args_parse "account all before yes json" "$@" ;;
     status | test-storage) args_parse "json" "$@" ;;
     config | secrets) args_parse "json pos" "$@" ;; # sub-command and KEY=VALUE pairs
     log) args_parse "tail json" "$@" ;;
@@ -204,6 +216,7 @@ main() {
     prune) with_alerts cmd_prune || rc=$? ;;
     check) with_alerts cmd_check || rc=$? ;;
     unlock) cmd_unlock || rc=$? ;;
+    recover) cmd_recover || rc=$? ;;
     test-storage) cmd_test_storage || rc=$? ;;
     verify-secrets) cmd_verify_secrets || rc=$? ;;
     *) ;;

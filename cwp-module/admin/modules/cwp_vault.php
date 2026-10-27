@@ -139,6 +139,7 @@ window.CWPV = <?= vault_json($cv) ?>;
     h += '<div class="row">' + tile(okN + ' / ' + accts.length, 'T_ACCOUNTS') +
       tile(anyRun ? badge('running') : (last ? badge(failN ? 'failed' : last.result) + '<br><small>' + ago(last.finished) + '</small>' : badge('never')), 'T_LASTRUN') +
       tile(esc(bytes(sum)), 'T_STORED') + tile('<small>' + next + '</small>', 'T_NEXT') + '</div>';
+    if (st.immutable && st.immutable.enabled) { h += '<p><span class="label label-success">' + L('IMM_BADGE', {m: st.immutable.mode, d: st.immutable.days}) + '</span></p>'; }
     h += '<p><button type="button" class="btn btn-primary" data-act="backup-all"' + (anyRun ? ' disabled' : '') + '>' + esc(tt('BTN_BACKUP_ALL')) + '</button></p>';
     h += '<div class="cv-wrap"><table class="table table-striped table-hover"><thead><tr>' +
       ['TH_ACCOUNT', 'TH_LAST', 'TH_RESULT', 'TH_DURATION', 'TH_ADDED', 'TH_SNAPS', 'TH_ACTIONS'].map(function (k) { return '<th scope="col">' + esc(tt(k)) + '</th>'; }).join('') + '</tr></thead><tbody>';
@@ -255,11 +256,13 @@ window.CWPV = <?= vault_json($cv) ?>;
     ['G_CONTENT', [['BACKUP_MAIL', 'bool', 'F_MAIL'], ['BACKUP_DATABASES', 'bool', 'F_DBS'], ['BACKUP_SERVER', 'bool', 'F_SERVER']]],
     ['G_RETENTION', [['KEEP_DAILY', 'number', 'F_DAILY'], ['KEEP_WEEKLY', 'number', 'F_WEEKLY'], ['KEEP_MONTHLY', 'number', 'F_MONTHLY']]],
     ['G_PERF', [['S3_CONNECTIONS', 'number', 'F_CONN'], ['LIMIT_UPLOAD_KIB', 'number', 'F_LIMIT', 'H_LIMIT']]],
+    ['G_IMMUTABLE', [['IMMUTABLE', 'bool', 'F_IMMUTABLE', 'H_IMMUTABLE'], ['LOCK_MODE', 'select', 'F_LOCKMODE', 'H_LOCKMODE'], ['LOCK_DAYS', 'number', 'F_LOCKDAYS', 'H_LOCKDAYS']]],
     ['G_ALERTS', [['ALERT_EMAIL', 'email', 'F_EMAIL'], ['ALERT_WEBHOOK', 'url', 'F_WEBHOOK', 'H_HTTPS'], ['HEARTBEAT_URL', 'url', 'F_HEARTBEAT', 'H_HTTPS']]]
   ];
   function field(f, v, pre) {
     var id = pre + f[0], hp = f[3] ? '<p class="help-block" id="' + id + '-h">' + esc(tt(f[3])) + '</p>' : '', d = f[3] ? ' aria-describedby="' + id + '-h"' : '';
     if (f[1] === 'bool') { return '<div class="checkbox"><label><input type="checkbox" id="' + id + '"' + (v === 'yes' ? ' checked' : '') + d + '> ' + esc(tt(f[2])) + '</label>' + hp + '</div>'; }
+    if (f[1] === 'select') { return '<div class="form-group"><label for="' + id + '">' + esc(tt(f[2])) + '</label><select class="form-control" style="max-width:420px" id="' + id + '"' + d + '>' + ['COMPLIANCE', 'GOVERNANCE'].map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select>' + hp + '</div>'; }
     return '<div class="form-group"><label for="' + id + '">' + esc(tt(f[2])) + '</label><input type="' + (f[1] === 'number' ? 'number" min="0' : (f[1] === 'email' ? 'email' : 'text')) + '" class="form-control" style="max-width:420px" id="' + id + '" value="' + esc(v) + '"' + d + ' autocomplete="off">' + hp + '</div>';
   }
   function val(f, pre) { var $e = $('#' + pre + f[0]); return f[1] === 'bool' ? ($e.is(':checked') ? 'yes' : 'no') : $.trim($e.val()); }

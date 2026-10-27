@@ -65,6 +65,47 @@ vault backup --account <one-account>
 sudo ./install.sh --enable-cron                  # then turn on the nightly job
 ```
 
+## Immutable backups (ransomware protection)
+
+Normal backups can be erased by anyone with root on the server or a stolen storage key. Immutable mode uses
+S3 Object Lock so deleted backups can be recovered. Read `docs/research/immutable.md` for the tested design.
+
+**Cost:** data you delete (old snapshots removed by `vault prune`) is kept until the lock ends plus 7 days,
+so you pay for roughly that much extra storage.
+
+**Lock mode:** `COMPLIANCE` cannot be bypassed by anyone, including the provider account owner, until the
+retention ends: this is the real protection. `GOVERNANCE` can be bypassed by a key that has the bypass
+permission (Contabo keys do), so use it only for testing. You cannot shorten a COMPLIANCE lock, so test with a
+throwaway bucket first.
+
+Object Lock can only be enabled when a bucket is created: **you need a new bucket**.
+
+1. Install the AWS CLI v2 on the server (it is only used to read and set bucket settings).
+2. Contabo: Object Storage, Create bucket. Pick the region, name it, and tick **Enable Object Lock** in the
+   creation form (versioning is turned on for you). Then open the bucket's Object Lock settings and set the
+   **default retention**: mode `COMPLIANCE`, **14 days** (or more).
+3. Point CWP Vault at the new bucket (Settings, or `S3_BUCKET` in `vault.conf`) and set
+   `IMMUTABLE=yes`, `LOCK_MODE=COMPLIANCE`, `LOCK_DAYS=14`. `LOCK_DAYS` must not be more than the bucket default.
+4. Run `vault init`. It refuses if the bucket has no object lock or a weaker default, and it adds a lifecycle
+   rule `cwp-vault-noncurrent` that frees old versions `LOCK_DAYS + 7` days after they are deleted. Other
+   lifecycle rules on the bucket are left alone.
+5. Run `vault test-storage` and a first backup. Existing backups in the old bucket are not moved: keep it until
+   the new one has enough history.
+
+**Recovering after a wipe** (someone ran `forget --prune` or deleted objects):
+
+```
+vault recover --account <user>                 # dry run: shows how many delete markers would be removed
+vault recover --account <user> --before 2026-10-28T03:00:00Z   # only markers newer than this time (UTC)
+vault recover --account <user> --yes           # remove them, then restic unlock --remove-all and restic check
+vault recover --all --yes                      # every account
+```
+
+Use `--before` with the time just before the attack so legitimate prunes are not undone. Afterwards check
+`vault snapshots --account <user>` and run a test restore. Immutable mode does not protect against an attacker
+who simply waits longer than `LOCK_DAYS` while silently breaking your backups: keep the heartbeat URL and the
+monthly test restore on.
+
 ## Upgrade
 
 Fetch the new version (`git pull` or a new tarball) and run `sudo ./install.sh` again. Engine files and the
