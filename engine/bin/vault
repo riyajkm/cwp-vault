@@ -83,7 +83,7 @@ EOF
 
 # args_parse "allowed option names" args...
 args_parse() {
-  local allowed=" $1 pos " opt val name has
+  local allowed=" $1 " opt val name has
   shift
   ARG_POS=()
   while (($# > 0)); do
@@ -174,7 +174,7 @@ main() {
     ls) args_parse "account snapshot path json" "$@" ;;
     prune | check | unlock) args_parse "account all" "$@" ;;
     status | test-storage) args_parse "json" "$@" ;;
-    config | secrets) args_parse "json" "$@" ;;
+    config | secrets) args_parse "json pos" "$@" ;; # sub-command and KEY=VALUE pairs
     log) args_parse "tail json" "$@" ;;
     *) ;;
   esac
@@ -197,7 +197,7 @@ main() {
   cfg_load
   case $cmd in
     init) cmd_init || rc=$? ;;
-    backup) with_alerts cmd_backup || rc=$? ;;
+    backup) if ((ARG_DRY)); then cmd_backup || rc=$?; else with_alerts cmd_backup || rc=$?; fi ;; # a dry run never pings or alerts
     restore) cmd_restore || rc=$? ;;
     snapshots) cmd_snapshots || rc=$? ;;
     ls) cmd_ls || rc=$? ;;
