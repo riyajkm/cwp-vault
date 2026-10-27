@@ -1,0 +1,53 @@
+# /usr/local/cwp-vault/etc/vault.conf   (mode 0640, root)
+# Plain KEY=value lines. This file is parsed, never executed: no quoting tricks, no $(...), no backticks.
+# Values are limited to 1024 characters. Secrets do NOT go here; see secrets.env.
+
+# --- Storage (required) ---
+# Host only, no bucket and no path. Must be https:// (unless ALLOW_INSECURE=yes, for a local test endpoint).
+S3_ENDPOINT=https://s3.example.com
+S3_BUCKET=example-backups
+# Optional folder inside the bucket, e.g. server1/ (a trailing / is added if missing).
+S3_PREFIX=
+
+# --- What to back up ---
+# "all" or space-separated usernames.
+ACCOUNTS=all
+# Usernames to skip.
+EXCLUDE_ACCOUNTS=
+# Extra glob patterns excluded from home/mail backups (space-separated). Always excluded already:
+# */cache/* */.cache/* */tmp/* */.trash/* */error_log */core.[0-9]*
+EXCLUDES=
+BACKUP_MAIL=yes
+BACKUP_DATABASES=yes
+BACKUP_SERVER=yes
+
+# --- Performance ---
+# Parallel S3 connections (restic -o s3.connections).
+S3_CONNECTIONS=4
+# Upload limit in KiB/s, 0 = unlimited.
+LIMIT_UPLOAD_KIB=0
+# Give up on one restic call after this long (e.g. 90m, 6h).
+ACCOUNT_TIMEOUT=6h
+# Abort when the cache or restore filesystem has less free space than this (GB). 0 = no check.
+MIN_FREE_GB=5
+
+# --- Retention (applied by "vault prune") ---
+KEEP_DAILY=7
+KEEP_WEEKLY=4
+KEEP_MONTHLY=3
+# Share of repository data re-read by "vault check" (e.g. 5%).
+CHECK_SUBSET=5%
+
+# --- Alerts (all optional; sent when a backup, prune or check exits non-zero) ---
+# One plain address. Mail is sent with "sendmail -t".
+ALERT_EMAIL=admin@example.com
+# https:// URL; receives a small JSON summary (counts and failed account names only).
+ALERT_WEBHOOK=
+# healthchecks-style URL: /start at the beginning, the URL itself on success, /fail on failure.
+HEARTBEAT_URL=
+
+# --- Reliability ---
+# Retries of a failed restic call, with waits of 30 s, 120 s, 300 s.
+RETRIES=3
+# yes allows an http:// S3_ENDPOINT. Only for local testing; never for real data.
+ALLOW_INSECURE=no

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+mkdir -p "$STUB_LOG"
+printf '%s\n' "$*" >>"$STUB_LOG/sendmail.log"
+cat >>"$STUB_LOG/sendmail.in"
+exit 0

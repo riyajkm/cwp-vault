@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2034 # test stub: literal text and fixture vars are intentional
+# Test stub for mysql. Logs argv; answers the queries the engine issues from fixtures.
+# Knobs: STUB_USERS (printf %b list), STUB_DOM_<acct>, STUB_DBS_<acct>, STUB_MYISAM, STUB_DB_EXISTS,
+# STUB_MYSQL_FAIL=1, STUB_IMPORT_FAIL=1
+mkdir -p "$STUB_LOG"
+printf '%s\n' "$*" >>"$STUB_LOG/mysql.log"
+[[ -z ${STUB_MYSQL_FAIL:-} ]] || { echo "ERROR 1045: access denied" >&2; exit 1; }
+q='' hdr=1
+for a in "$@"; do
+  case $a in
+    --execute=*) q=${a#--execute=} ;;
+    --skip-column-names) hdr=0 ;;
+  esac
+done
+if [[ -z $q ]]; then
+  cat >"$STUB_LOG/mysql_import.sql"
+  [[ -z ${STUB_IMPORT_FAIL:-} ]] || exit 1
+  exit 0
+fi
+acct_of() { local s=${1#*"'"}; s=${s%%"'"*}; printf '%s' "${s%%\\*}"; }
+lst() { printf '%b\n' "$1"; }
+case $q in
+  "SELECT username FROM root_cwp.user") lst "${STUB_USERS-alice\nbob}" ;;
+  "SELECT domain FROM root_cwp.user WHERE username="*)
+    u=$(acct_of "$q"); v=STUB_DOM_$u
+    case $u in alice) d=example.com ;; bob) d=example.org ;; *) d= ;; esac
+    lst "${!v-$d}" ;;
+  "SELECT domain FROM root_cwp.domains"*) ;;
+  "SELECT CONCAT(subdomain"*) ;;
+  "SHOW DATABASES LIKE"*)
+    u=$(acct_of "$q"); v=STUB_DBS_$u
+    case $u in alice) d='alice_wp\nalice_shop' ;; bob) d=bob_main ;; *) d= ;; esac
+    lst "${!v-$d}" ;;
+  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='"*"AND engine"*) echo "${STUB_MYISAM:-0}" ;;
+  "SELECT COUNT(*) FROM information_schema.schemata"*) echo "${STUB_DB_EXISTS:-0}" ;;
+  "SELECT COUNT(*) FROM information_schema.tables"*) echo 3 ;;
+  "SELECT COALESCE"*) echo 1234 ;;
+  "CREATE DATABASE"*) ;;
+  "SELECT username, domain"*) printf 'username\tdomain\temail\nalice\texample.com\talice@example.com\n' ;;
+  "SELECT domain, user, path"*) printf 'domain\tuser\tpath\n' ;;
+  "SELECT subdomain, domain"*) printf 'subdomain\tdomain\tuser\tpath\n' ;;
+  "SELECT p.*"*) printf 'package_name\tdisk\nstarter\t1000\n' ;;
+  "SELECT * FROM postfix.domain"*) printf 'domain\nexample.com\n' ;;
+  "SELECT * FROM postfix.mailbox"*) printf 'username\tpassword\tdomain\ninfo@example.com\t{BLF-CRYPT}HASHSECRET\texample.com\n' ;;
+  "SELECT * FROM postfix.alias"*) printf 'address\tgoto\tdomain\n' ;;
+  *) ;;
+esac
+exit 0
