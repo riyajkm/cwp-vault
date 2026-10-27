@@ -64,3 +64,6 @@ IMMUTABLE=no
 LOCK_MODE=COMPLIANCE
 # 1-3650. The bucket default retention must be at least this long. Deleted data is kept for this long plus 7 days.
 LOCK_DAYS=14
+
+# Hours a downloadable export is kept before "vault export-clean" deletes it (1-720).
+EXPORT_KEEP_HOURS=24
