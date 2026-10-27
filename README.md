@@ -113,7 +113,11 @@ setuid/setgid are stripped, and restores are audit-logged. Report vulnerabilitie
 **What does it cost?**
 Your S3 storage bill. Restic deduplicates and compresses (in our first test a 0.9 GB account was stored as 313 MB).
 In immutable mode, deleted data is held for `LOCK_DAYS` + 7 days, so budget extra.
-<!-- TODO(owner): add a worked Contabo example (per-100-GB price) only after checking Contabo's current Object Storage price page, with a date and link. -->
+Example with Contabo: Object Storage is sold in **250 GB** slices with traffic included, from about **€2.49/month**
+(EU/US) or about **€2.99/month** (Singapore), checked 28 Oct 2026 — see [contabo.com/en/object-storage](https://contabo.com/en/object-storage/)
+for current prices. The reference server's 6 accounts (~22 GB of source data, stored smaller after compression and
+deduplication) fit comfortably in the smallest plan, with room for weeks of daily snapshots. Immutable mode keeps
+deleted data until the lock ends, so leave some headroom.
 
 **How long does a restore take?**
 Measured on the reference server ([docs/research/stage0.md](docs/research/stage0.md)): a full restore of a 0.9 GB account to a temp folder took 45 s with 0 differences.
