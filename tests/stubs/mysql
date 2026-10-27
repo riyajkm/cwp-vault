@@ -2,7 +2,7 @@
 # shellcheck disable=SC2034 # test stub: literal text and fixture vars are intentional
 # Test stub for mysql. Logs argv; answers the queries the engine issues from fixtures.
 # Knobs: STUB_USERS (printf %b list), STUB_DOM_<acct>, STUB_DBS_<acct>, STUB_MYISAM, STUB_DB_EXISTS,
-# STUB_MYSQL_FAIL=1, STUB_IMPORT_FAIL=1
+# STUB_MYSQL_FAIL=1, STUB_IMPORT_FAIL=1, STUB_VERIFY_TABLES=N (tables found in a throwaway database, default 1)
 mkdir -p "$STUB_LOG"
 printf '%s\n' "$*" >>"$STUB_LOG/mysql.log"
 [[ -z ${STUB_MYSQL_FAIL:-} ]] || { echo "ERROR 1045: access denied" >&2; exit 1; }
@@ -34,6 +34,7 @@ case $q in
     lst "${!v-$d}" ;;
   "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='"*"AND engine"*) echo "${STUB_MYISAM:-0}" ;;
   "SELECT COUNT(*) FROM information_schema.schemata"*) echo "${STUB_DB_EXISTS:-0}" ;;
+  *"table_type='BASE TABLE'"*) echo "${STUB_VERIFY_TABLES:-1}" ;;
   "SELECT COUNT(*) FROM information_schema.tables"*) echo 3 ;;
   "SELECT COALESCE"*) echo 1234 ;;
   "CREATE DATABASE"*) ;;

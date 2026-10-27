@@ -46,6 +46,11 @@ ALERT_WEBHOOK=
 # healthchecks-style URL: /start at the beginning, the URL itself on success, /fail on failure.
 HEARTBEAT_URL=
 
+# --- Deleted accounts ---
+# "vault orphans --purge" thins the backup history of an account that no longer exists in CWP once its newest
+# snapshot is older than this many days. 0 = never purge.
+ORPHAN_KEEP_DAYS=30
+
 # --- Reliability ---
 # Retries of a failed restic call, with waits of 30 s, 120 s, 300 s.
 RETRIES=3
