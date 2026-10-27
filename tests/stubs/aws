@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2016 # test stub: literal text and fixture vars are intentional
+# Test stub for the aws CLI (s3api only). Logs "<args>" to $STUB_LOG/aws.log.
+# Knobs (env): STUB_LOCK_MISSING=1, STUB_LOCK_ENABLED (default Enabled), STUB_LOCK_MODE (COMPLIANCE), STUB_LOCK_DAYS (14),
+# STUB_LIFECYCLE_FILE=path (existing rules), STUB_DELETE_FAIL=1. The alice repo has 3 delete markers, bob has none.
+mkdir -p "$STUB_LOG"
+printf '%s\n' "$*" >>"$STUB_LOG/aws.log"
+printf 'key_in_env=%s region=%s\n' "${AWS_ACCESS_KEY_ID:+yes}" "${AWS_DEFAULT_REGION:-}" >>"$STUB_LOG/aws.env.log"
+args=("$@")
+sub='' prefix='' file=''
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case ${args[i]} in
+    --endpoint-url | --output) i=$((i + 1)) ;;
+    s3api) ;;
+    --prefix) prefix=${args[i + 1]} ;;
+    --lifecycle-configuration) file=${args[i + 1]#file://} ;;
+    -*) ;;
+    *) [[ -n $sub ]] || sub=${args[i]} ;;
+  esac
+done
+case $sub in
+  get-object-lock-configuration)
+    if [[ -n ${STUB_LOCK_MISSING:-} ]]; then
+      echo "An error occurred (ObjectLockConfigurationNotFoundError) when calling the GetObjectLockConfiguration operation" >&2
+      exit 254
+    fi
+    printf '{"ObjectLockConfiguration":{"ObjectLockEnabled":"%s","Rule":{"DefaultRetention":{"Mode":"%s","Days":%s}}}}\n' \
+      "${STUB_LOCK_ENABLED:-Enabled}" "${STUB_LOCK_MODE:-COMPLIANCE}" "${STUB_LOCK_DAYS:-14}" ;;
+  get-bucket-lifecycle-configuration)
+    if [[ -f $STUB_LOG/lifecycle.json ]]; then cat "$STUB_LOG/lifecycle.json"
+    elif [[ -n ${STUB_LIFECYCLE_FILE:-} ]]; then cat "$STUB_LIFECYCLE_FILE"
+    else echo "An error occurred (NoSuchLifecycleConfiguration) when calling the GetBucketLifecycleConfiguration operation" >&2; exit 254; fi ;;
+  put-bucket-lifecycle-configuration)
+    cp "$file" "$STUB_LOG/lifecycle.json" ;;
+  list-object-versions)
+    if [[ $prefix == */vault/alice/ ]]; then
+      printf '{"Versions":[{"Key":"%sdata/00/aa","VersionId":"v0","IsLatest":false}],"DeleteMarkers":[' "$prefix"
+      printf '{"Key":"%sdata/00/aa","VersionId":"m1","IsLatest":true,"LastModified":"2026-10-27T10:00:00+00:00"},' "$prefix"
+      printf '{"Key":"%slocks/bb","VersionId":"m2","IsLatest":true,"LastModified":"2026-10-28T02:00:00+00:00"},' "$prefix"
+      printf '{"Key":"%ssnapshots/cc","VersionId":"m3","IsLatest":true,"LastModified":"2026-10-28T03:00:00+00:00"}]}\n' "$prefix"
+    else
+      echo '{"Versions":[],"DeleteMarkers":[]}'
+    fi ;;
+  delete-object)
+    if [[ -n ${STUB_DELETE_FAIL:-} ]]; then echo "An error occurred (AccessDenied) when calling the DeleteObject operation" >&2; exit 254; fi
+    echo '{"DeleteMarker":true}' ;;
+  *) ;;
+esac
+exit 0

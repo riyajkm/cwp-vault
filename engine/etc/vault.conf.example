@@ -51,3 +51,11 @@ HEARTBEAT_URL=
 RETRIES=3
 # yes allows an http:// S3_ENDPOINT. Only for local testing; never for real data.
 ALLOW_INSECURE=no
+
+# --- Immutable backups (ransomware protection; see docs/INSTALL.md) ---
+# yes needs a NEW bucket created with Object Lock and a default retention, plus the aws CLI v2 on this server.
+IMMUTABLE=no
+# COMPLIANCE (cannot be bypassed by anyone) or GOVERNANCE (testing only). Must match the bucket default retention.
+LOCK_MODE=COMPLIANCE
+# 1-3650. The bucket default retention must be at least this long. Deleted data is kept for this long plus 7 days.
+LOCK_DAYS=14
