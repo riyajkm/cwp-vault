@@ -77,7 +77,14 @@ function vault_mock_data(array $a)
             return $lines;
         case 'test-storage':
             return ['ok' => true, 'write_ms' => 412, 'read_ms' => 188, 'delete_ms' => 95, 'error' => null];
+        case 'jobs':
+            return [['job' => gmdate('Ymd\THis\Z', $now - 600) . '-demo', 'state' => 'done', 'ok' => true, 'account' => 'demo', 'what' => 'files',
+                'target' => '/var/lib/cwp-vault/restore/demo', 'files' => 1284, 'bytes' => 734003200, 'duration_s' => 38, 'error' => '', 'percent' => 100]];
+        case 'job':
+            return ['job' => $a[2], 'state' => 'done', 'ok' => true, 'account' => 'demo', 'what' => 'files', 'target' => '/var/lib/cwp-vault/restore/demo',
+                'files' => 1284, 'bytes' => 734003200, 'duration_s' => 38, 'error' => '', 'percent' => 100, 'in_place' => in_array('--in-place', $a, true), 'safety_snapshots' => ['deadbeef']];
         case 'restore':
+            if (in_array('--detach', $a, true)) { return ['job' => gmdate('Ymd\THis\Z', $now) . "-$acct"]; }
             return ['ok' => true, 'job' => gmdate('YmdHis', $now) . '-' . $acct,
                 'target' => '/var/lib/cwp-vault/restore/' . gmdate('YmdHis', $now) . "-$acct",
                 'files' => 1284, 'bytes' => 734003200, 'duration_s' => 38, 'error' => null];

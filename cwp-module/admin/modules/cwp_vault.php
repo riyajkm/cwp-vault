@@ -44,6 +44,8 @@ $tx = function ($k) use ($T) { return h($T[$k] ?? $k); };
     <div id="rs-snaps"></div>
     <div id="rs-panel"></div>
     <div id="rs-result" aria-live="polite"></div>
+    <h5><?= $tx('RS_RECENT') ?></h5>
+    <div id="rs-recent"></div>
   </div>
   <div class="tab-pane" id="cv-settings"><div id="cv-settings-body"><span class="cv-spin" aria-hidden="true"></span> <?= $tx('LOADING') ?></div></div>
   <div class="tab-pane" id="cv-logs">
@@ -190,7 +192,13 @@ window.CWPV = <?= vault_json($cv) ?>;
     $(this).closest('tbody').find('tr').removeClass('info'); $(this).closest('tr').addClass('info');
     var s = R.snap, d = new Date(), ymd = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
     var h = '<div class="panel panel-default"><div class="panel-heading">' + L('RS_PANEL', {k: tt('K_' + s.kind), t: new Date(s.time).toLocaleString()}) + '</div><div class="panel-body">';
-    if (s.kind === 'files') { h += '<div id="rs-browser"></div><hr>'; }
+    if (s.kind === 'files') {
+      h += '<div class="form-group"><label class="radio-inline"><input type="radio" name="rs-mode" value="files" checked> ' + esc(tt('RS_MODE_FILES')) + '</label>' +
+        '<label class="radio-inline"><input type="radio" name="rs-mode" value="mail"> ' + esc(tt('RS_MODE_MAIL')) + '</label></div>' +
+        '<div id="rs-mail" style="display:none"><div class="form-inline"><label for="rs-dom">' + esc(tt('RS_MAIL_DOMAIN')) + '</label> <select id="rs-dom" class="form-control"></select> ' +
+        '<label for="rs-mbx">' + esc(tt('RS_MAIL_BOX')) + '</label> <select id="rs-mbx" class="form-control"></select></div><hr></div>' +
+        '<div id="rs-browser"></div><hr>';
+    }
     else if (s.kind === 'db') {
       var nm = ((s.db || R.account + '_db') + '_restored_' + ymd).slice(0, R.account.length + 57);
       h += '<div class="form-group"><label for="rs-dbname">' + esc(tt('RS_DBNAME')) + '</label><input type="text" id="rs-dbname" class="form-control" style="max-width:420px" value="' + esc(nm) + '" maxlength="' + (R.account.length + 57) + '" autocomplete="off">' +
@@ -198,6 +206,11 @@ window.CWPV = <?= vault_json($cv) ?>;
     } else { h += '<p>' + esc(tt('RS_META_NOTE')) + '</p>'; }
     if (s.kind !== 'db') {
       h += '<div class="form-group"><label for="rs-target">' + esc(tt('RS_TARGET')) + '</label><input type="text" id="rs-target" class="form-control" style="max-width:420px" placeholder="' + esc(tt('RS_TARGET_PH')) + '" autocomplete="off"><p class="help-block">' + esc(tt('RS_TARGET_HELP')) + '</p></div>';
+    }
+    if (s.kind !== 'meta') {
+      h += '<div class="panel panel-danger"><div class="panel-body"><div class="checkbox"><label class="text-danger"><input type="checkbox" id="rs-inplace"> <strong>' + esc(tt('RS_INPLACE')) + '</strong></label>' +
+        '<p class="help-block">' + esc(tt('RS_INPLACE_HELP')) + '</p></div><div class="form-group" id="rs-confirm-wrap" style="display:none"><label for="rs-confirm">' + L('RS_INPLACE_TYPE', {a: R.account}) + '</label>' +
+        '<input type="text" id="rs-confirm" class="form-control" style="max-width:320px" autocomplete="off"></div></div></div>';
     }
     h += '<div class="checkbox"><label><input type="checkbox" id="rs-dry" checked> ' + esc(tt('RS_DRY')) + '</label><p class="help-block">' + esc(tt('RS_DRY_HELP')) + '</p></div>' +
       '<button type="button" class="btn btn-primary" id="rs-go">' + esc(tt('BTN_RESTORE')) + '</button></div></div>';
@@ -222,32 +235,93 @@ window.CWPV = <?= vault_json($cv) ?>;
   function selCount() { var n = Object.keys(R.sel).length; $('#rs-count').text(n ? tt('RS_SELECTED', {n: n}) : tt('RS_NOSEL')); }
   $('#rs-panel').on('click', '.cv-crumb a, a.cv-dir', function (e) { e.preventDefault(); browse($(this).data('path') + ''); })
     .on('change', '.rs-pick', function () { var p = $(this).data('path'); if (this.checked) { R.sel[p] = 1; } else { delete R.sel[p]; } selCount(); })
-    .on('click', '#rs-go', restoreConfirm);
+    .on('click', '#rs-go', restoreConfirm)
+    .on('change', '#rs-inplace', function () { $('#rs-confirm-wrap').toggle(this.checked); $('#rs-target,#rs-dbname').prop('disabled', this.checked); if (this.checked) { $('#rs-confirm').focus(); } })
+    .on('change', 'input[name=rs-mode]', function () {
+      var mail = $('input[name=rs-mode]:checked').val() === 'mail';
+      $('#rs-mail').toggle(mail); $('#rs-browser').toggle(!mail);
+      if (mail && !$('#rs-dom option').length) { mailLs('/var/vmail', '#rs-dom', loadBoxes); }
+    })
+    .on('change', '#rs-dom', loadBoxes);
+  // mailbox picker: /var/vmail/<domain>/<user> inside the files snapshot
+  function mailLs(path, sel, done) {
+    api('ls', {account: R.account, snapshot: R.snap.id, path: path}).then(function (rows) {
+      $(sel).html(rows.filter(function (r) { return r.type === 'dir'; }).map(function (r) { return '<option>' + esc(r.name) + '</option>'; }).join(''));
+      if (done) { done(); }
+    }, function (e) { $(sel).html(''); notify(tt('E_TITLE'), e, true); });
+  }
+  function loadBoxes() { if ($('#rs-dom').val()) { mailLs('/var/vmail/' + $('#rs-dom').val(), '#rs-mbx'); } }
   function restoreConfirm() {
     var s = R.snap, dry = $('#rs-dry').is(':checked'), isDb = s.kind === 'db', target = $.trim($('#rs-target').val() || ''), db = $.trim($('#rs-dbname').val() || '');
     if (isDb && !new RegExp('^' + R.account + '_[A-Za-z0-9_]{1,56}$').test(db)) { notify(tt('E_TITLE'), tt('E_DBNAME', {a: R.account}), true); $('#rs-dbname').focus(); return; }
     if (target && (target.charAt(0) !== '/' || /(^|\/)\.\.(\/|$)/.test(target))) { notify(tt('E_TITLE'), tt('E_TARGET'), true); $('#rs-target').focus(); return; }
-    var paths = Object.keys(R.sel), li = [];
+    var inPlace = $('#rs-inplace').is(':checked'), mail = $('input[name=rs-mode]:checked').val() === 'mail', mailbox = '';
+    if (inPlace && $.trim($('#rs-confirm').val() || '') !== R.account) { notify(tt('E_TITLE'), tt('E_CONFIRM', {a: R.account}), true); $('#rs-confirm').focus(); return; }
+    if (mail) {
+      if (!$('#rs-mbx').val() || !$('#rs-dom').val()) { notify(tt('E_TITLE'), tt('E_MAILBOX'), true); return; }
+      mailbox = $('#rs-mbx').val() + '@' + $('#rs-dom').val();
+    }
+    var paths = mail ? [] : Object.keys(R.sel), li = [];
     li.push(L('CF_ACCOUNT', {v: R.account}), L('CF_SNAP', {v: new Date(s.time).toLocaleString() + ' (' + s.short_id + ')'}));
-    if (isDb) { li.push(L('CF_DB', {v: s.db}), L('CF_NEWDB', {v: db})); }
+    if (isDb) { li.push(L('CF_DB', {v: s.db}), inPlace ? esc(tt('CF_LIVEDB')) : L('CF_NEWDB', {v: db})); }
+    else if (mail) { li.push(L('CF_MAILBOX', {v: mailbox})); if (!inPlace) { li.push(L('CF_TARGET', {v: target || tt('RS_TARGET_DEFAULT')})); } }
     else {
       li.push(paths.length ? L('CF_PATHS', {n: paths.length}) + '<ul><li>' + paths.slice(0, 10).map(esc).join('</li><li>') + (paths.length > 10 ? '</li><li>…' : '') + '</li></ul>' : esc(tt('CF_ALL')));
-      li.push(L('CF_TARGET', {v: target || tt('RS_TARGET_DEFAULT')}));
+      if (!inPlace) { li.push(L('CF_TARGET', {v: target || tt('RS_TARGET_DEFAULT')})); }
     }
-    li.push(esc(tt(dry ? 'CF_DRY' : 'CF_REAL')));
+    if (inPlace) { li.push('<strong class="text-danger">' + esc(tt('CF_INPLACE')) + '</strong>'); }
+    li.push(esc(tt(dry ? 'CF_DRY' : (inPlace ? 'CF_REAL_LIVE' : 'CF_REAL'))));
     confirmBox(tt(dry ? 'CF_TITLE_DRY' : 'CF_TITLE'), '<ul>' + li.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>', tt('BTN_RESTORE'), function () {
       $('#rs-go').prop('disabled', true).prepend('<span class="cv-spin" aria-hidden="true"></span> ');
       $('#rs-result').html('<span class="cv-spin" aria-hidden="true"></span> ' + esc(tt('RS_WORKING')));
-      var data = {account: R.account, snapshot: s.id, what: s.kind, dry_run: dry ? '1' : '0'};
-      if (isDb) { data.db = s.db; data.target_db = db; } else { data.paths = paths; if (target) { data.target = target; } }
+      var data = {account: R.account, snapshot: s.id, what: mail ? 'mail' : s.kind, dry_run: dry ? '1' : '0'};
+      if (inPlace) { data.in_place = '1'; data.confirm = R.account; }
+      if (isDb) { data.db = s.db; if (!inPlace) { data.target_db = db; } }
+      else if (mail) { data.mailbox = mailbox; if (target && !inPlace) { data.target = target; } }
+      else { data.paths = paths; if (target && !inPlace) { data.target = target; } }
       api('restore', data, true).then(function (r) {
+        if (r.job) { pollJob(r.job); return; }
         $('#rs-go').prop('disabled', false).find('.cv-spin').remove();
-        var rows = [['RS_STATUS', r.ok ? '✔ ' + tt(dry ? 'RS_DRYOK' : 'RS_OK') : '✖ ' + tt('R_FAILED')], ['RS_JOB', r.job], ['RS_TARGETDIR', r.target], ['RS_FILES', r.files], ['RS_BYTES', r.bytes == null ? null : bytes(r.bytes)], ['RS_DURATION', r.duration_s == null ? null : dur(r.duration_s)], ['RS_ERROR', r.error]];
-        $('#rs-result').html('<div class="panel panel-' + (r.ok ? 'success' : 'danger') + '"><div class="panel-heading">' + esc(tt(dry ? 'RS_DRYRESULT' : 'RS_RESULT')) + '</div><div class="panel-body"><dl class="dl-horizontal">' +
-          rows.filter(function (x) { return x[1] != null && x[1] !== ''; }).map(function (x) { return '<dt>' + esc(tt(x[0])) + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl></div></div>');
+        showJob(r, dry);
       }, function (e) { $('#rs-go').prop('disabled', false).find('.cv-spin').remove(); $('#rs-result').html(alertBox('danger', e)); });
     });
   }
+  // A real restore is a background job: poll it every 2 s until it is done or failed.
+  function pollJob(id) {
+    clearTimeout(R.poll);
+    api('job', {id: id}).then(function (j) {
+      var st = j.state || (j.ok ? 'done' : 'failed');
+      if (st === 'queued' || st === 'running') {
+        var pc = Math.max(0, Math.min(100, +j.percent || 0));
+        $('#rs-result').html('<div class="progress" style="max-width:520px"><div class="progress-bar progress-bar-striped active" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pc + '" style="width:' + pc + '%;min-width:2em">' + pc + '%</div></div><p class="text-muted">' +
+          esc(tt('RS_WORKING')) + (j.bytes_done ? ' ' + esc(bytes(j.bytes_done)) : '') + '</p>');
+        R.poll = setTimeout(function () { pollJob(id); }, 2000);
+        return;
+      }
+      $('#rs-go').prop('disabled', false).find('.cv-spin').remove();
+      showJob(j, false); loadJobs();
+    }, function (e) { $('#rs-go').prop('disabled', false).find('.cv-spin').remove(); $('#rs-result').html(alertBox('danger', e)); });
+  }
+  function showJob(r, dry) {
+    var rows = [['RS_STATUS', r.ok ? '✔ ' + tt(dry ? 'RS_DRYOK' : 'RS_OK') : '✖ ' + tt('R_FAILED')], ['RS_JOB', r.job], ['RS_TARGETDIR', r.target], ['RS_FILES', r.files], ['RS_BYTES', r.bytes == null ? null : bytes(r.bytes)], ['RS_DURATION', r.duration_s == null ? null : dur(r.duration_s)], ['RS_ERROR', r.error]];
+    if (r.in_place) { rows.push(['RS_SAFETY', (r.safety_snapshots || []).join(', ') || null]); }
+    $('#rs-result').html('<div class="panel panel-' + (r.ok ? 'success' : 'danger') + '"><div class="panel-heading">' + esc(tt(dry ? 'RS_DRYRESULT' : 'RS_RESULT')) + '</div><div class="panel-body"><dl class="dl-horizontal">' +
+      rows.filter(function (x) { return x[1] != null && x[1] !== ''; }).map(function (x) { return '<dt>' + esc(tt(x[0])) + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl>' +
+      (r.in_place && r.ok ? '<p class="text-muted">' + esc(tt('RS_SAFETY_NOTE')) + '</p>' : '') + '</div></div>');
+  }
+  function loadJobs() {
+    api('jobs').then(function (list) {
+      var h = '<div class="cv-wrap"><table class="table table-striped"><thead><tr>' + ['TH_TIME', 'TH_ACCOUNT', 'TH_WHAT', 'TH_STATE', 'RS_ERROR'].map(function (k) { return '<th scope="col">' + esc(tt(k)) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      if (!list.length) { h += '<tr><td colspan="5">' + esc(tt('RS_NORECENT')) + '</td></tr>'; }
+      list.forEach(function (j) {
+        var st = j.state || (j.ok ? 'done' : 'failed'), iso = String(j.job).replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z.*/, '$1-$2-$3T$4:$5:$6Z');
+        h += '<tr><td>' + when(iso) + '</td><td>' + esc(j.account || String(j.job).replace(/^[^-]*-/, '')) + '</td><td>' + esc((j.what || '') + (j.in_place ? ' (' + tt('RS_LIVE') + ')' : '')) + '</td><td>' +
+          '<span class="label label-' + ({done: 'success', failed: 'danger'}[st] || 'info') + '">' + esc(tt('J_' + st)) + '</span></td><td>' + esc(j.error || '') + '</td></tr>';
+      });
+      $('#rs-recent').html(h + '</tbody></table></div>');
+    }, function (e) { $('#rs-recent').html(alertBox('danger', e)); });
+  }
+  $(document).on('shown.bs.tab', 'a[href="#cv-restore"]', loadJobs);
 
   // ---------- Settings ----------
   var GROUPS = [

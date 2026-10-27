@@ -13,6 +13,8 @@ const VAULT_BIN = '/usr/local/bin/vault';
 const VAULT_CRON = '/etc/cron.d/cwp-vault';
 const VAULT_RE_ACCOUNT = '/^[a-z][a-z0-9_]{0,31}$/';
 const VAULT_RE_SNAPSHOT = '/^[a-f0-9]{8,64}$/';
+const VAULT_RE_JOB = '/^[0-9]{8}T[0-9]{6}Z-[a-z][a-z0-9_]{0,31}$/';
+const VAULT_RE_MAILBOX = '/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}@[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/';
 const VAULT_RE_DBANY = '/^[a-z][a-z0-9_]{0,31}_[A-Za-z0-9_]{1,56}$/';
 
 // CWP manages its own session; never start or write one here.
@@ -92,9 +94,10 @@ function vault_check_args(array $args): ?string
         'backup' => ['--account', '--all', '--dry-run', '--quiet'],
         'prune' => ['--account', '--all', '--quiet'], 'check' => ['--account', '--all', '--quiet'],
         'unlock' => ['--account', '--all'],
-        'restore' => ['--account', '--snapshot', '--what', '--path', '--db', '--target', '--target-db', '--dry-run', '--json', '--quiet'],
+        'restore' => ['--account', '--snapshot', '--what', '--path', '--db', '--target', '--target-db', '--mailbox', '--in-place', '--confirm', '--detach', '--dry-run', '--json', '--quiet'],
+        'jobs' => ['--json'], 'job' => ['--id', '--json'],
     ];
-    $bool = ['--json', '--all', '--dry-run', '--quiet'];
+    $bool = ['--json', '--all', '--dry-run', '--quiet', '--in-place', '--detach'];
     $verb = $args[0] ?? '';
     foreach ($args as $a) { if (!is_string($a) || strpos($a, "\0") !== false) { return 'bad argument'; } }
 
@@ -130,6 +133,9 @@ function vault_check_args(array $args): ?string
             case '--path': case '--target': $ok = vault_ok_path($v); break;
             case '--what': $ok = in_array($v, ['files', 'db', 'mail', 'meta'], true); break;
             case '--db': case '--target-db': $ok = (bool)preg_match(VAULT_RE_DBANY, $v); break;
+            case '--confirm': $ok = (bool)preg_match(VAULT_RE_ACCOUNT, $v); break;
+            case '--mailbox': $ok = strlen($v) <= 300 && preg_match(VAULT_RE_MAILBOX, $v); break;
+            case '--id': $ok = (bool)preg_match(VAULT_RE_JOB, $v); break;
             case '--tail': $ok = ctype_digit($v) && (int)$v >= 1 && (int)$v <= 2000; break;
         }
         if (!$ok) { return 'invalid ' . $f; }
@@ -137,6 +143,15 @@ function vault_check_args(array $args): ?string
     }
     $acct = $seen['--account'][0] ?? null;
     if (in_array($verb, ['snapshots', 'ls', 'restore'], true) && $acct === null) { return 'account required'; }
+    if ($verb === 'job' && !isset($seen['--id'])) { return 'job id required'; }
+    if (isset($seen['--in-place'])) {
+        // the engine checks these too; refusing here keeps a bad request from ever reaching it
+        if (($seen['--confirm'][0] ?? null) !== $acct) { return 'type the account name to confirm'; }
+        if (!isset($seen['--snapshot']) || $seen['--snapshot'][0] === 'latest') { return 'an in-place restore needs a snapshot id'; }
+        if (isset($seen['--target']) || isset($seen['--target-db'])) { return 'in-place takes no target'; }
+        if (!in_array($seen['--what'][0] ?? '', ['files', 'db', 'mail'], true)) { return 'in-place works for files, databases and mail'; }
+    } elseif (isset($seen['--confirm'])) { return '--confirm is only for in-place'; }
+    if (isset($seen['--mailbox']) && ($seen['--what'][0] ?? '') !== 'mail') { return 'mailbox is only for mail'; }
     foreach (['--db', '--target-db'] as $f) {
         foreach ($seen[$f] ?? [] as $db) { if (strpos($db, $acct . '_') !== 0) { return 'database does not belong to account'; } }
     }
@@ -312,14 +327,25 @@ function vault_dispatch(string $acc): void
             if ($what === 'files' && is_array($paths)) {
                 foreach (array_slice($paths, 0, 200) as $p) { if (is_string($p)) { array_push($a, '--path', $p); } }
             }
-            if ($what === 'db') { array_push($a, '--db', vault_str('db'), '--target-db', vault_str('target_db')); }
+            if ($what === 'mail' && vault_str('mailbox') !== '') { array_push($a, '--mailbox', vault_str('mailbox')); }
+            if (vault_str('in_place') === '1') { array_push($a, '--in-place', '--confirm', vault_str('confirm')); }
+            elseif ($what === 'db') { array_push($a, '--db', vault_str('db'), '--target-db', vault_str('target_db')); }
             elseif (vault_str('target') !== '') { array_push($a, '--target', vault_str('target')); }
-            if (vault_str('dry_run') === '1') { $a[] = '--dry-run'; }
+            if ($what === 'db' && vault_str('in_place') === '1') { array_push($a, '--db', vault_str('db')); }
+            if (vault_str('dry_run') === '1') { $a[] = '--dry-run'; } else { $a[] = '--detach'; } // a real restore is a background job
             $a[] = '--json';
-            @set_time_limit(0); ignore_user_abort(true);
-            session_write_close(); // do not block other admin requests during a long restore
+            session_write_close();
             $r = vault_run($a);
             if (!is_array($r['data'])) { vault_fail($r); }
+            vault_out(true, $r['data']);
+
+        case 'job':
+            $id = vault_str('id', 'G');
+            if (!preg_match(VAULT_RE_JOB, $id)) { vault_out(false, null, 'Invalid job'); }
+            $r = vault_run(['job', '--id', $id, '--json']); if (!is_array($r['data'])) { vault_fail($r); }
+            vault_out(true, $r['data']);
+        case 'jobs':
+            $r = vault_run(['jobs', '--json']); if (!is_array($r['data'])) { vault_fail($r); }
             vault_out(true, $r['data']);
 
         case 'config_set':
