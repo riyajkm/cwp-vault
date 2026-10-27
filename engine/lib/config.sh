@@ -9,7 +9,7 @@ declare -A CFG_DEFAULTS=(
   [S3_CONNECTIONS]=4 [LIMIT_UPLOAD_KIB]=0 [KEEP_DAILY]=7 [KEEP_WEEKLY]=4 [KEEP_MONTHLY]=3
   [CHECK_SUBSET]='5%' [ALERT_EMAIL]='' [ALERT_WEBHOOK]='' [HEARTBEAT_URL]='' [RETRIES]=3
   [ALLOW_INSECURE]=no [ACCOUNT_TIMEOUT]=6h [MIN_FREE_GB]=5
-  [IMMUTABLE]=no [LOCK_MODE]=COMPLIANCE [LOCK_DAYS]=14
+  [IMMUTABLE]=no [LOCK_MODE]=COMPLIANCE [LOCK_DAYS]=14 [ORPHAN_KEEP_DAYS]=30
 )
 declare -A CFG_SECRET_KEYS=([AWS_ACCESS_KEY_ID]=1 [AWS_SECRET_ACCESS_KEY]=1 [RESTIC_PASSWORD]=1)
 
@@ -63,13 +63,14 @@ cfg_validate() {
   for k in BACKUP_MAIL BACKUP_DATABASES BACKUP_SERVER ALLOW_INSECURE IMMUTABLE; do
     [[ ${!k} == yes || ${!k} == no ]] || cfg_bad "$k" "must be yes or no"
   done
-  for k in S3_CONNECTIONS LIMIT_UPLOAD_KIB KEEP_DAILY KEEP_WEEKLY KEEP_MONTHLY RETRIES MIN_FREE_GB; do
+  for k in S3_CONNECTIONS LIMIT_UPLOAD_KIB KEEP_DAILY KEEP_WEEKLY KEEP_MONTHLY RETRIES MIN_FREE_GB ORPHAN_KEEP_DAYS; do
     [[ ${!k} =~ ^[0-9]{1,6}$ ]] || cfg_bad "$k" "must be a number"
   done
   [[ $LOCK_MODE == COMPLIANCE || $LOCK_MODE == GOVERNANCE ]] || cfg_bad LOCK_MODE "must be COMPLIANCE or GOVERNANCE"
   [[ $LOCK_DAYS =~ ^[0-9]{1,4}$ ]] || cfg_bad LOCK_DAYS "must be a number"
   ((10#$LOCK_DAYS >= 1 && 10#$LOCK_DAYS <= 3650)) || cfg_bad LOCK_DAYS "must be 1 to 3650"
   LOCK_DAYS=$((10#$LOCK_DAYS))
+  ORPHAN_KEEP_DAYS=$((10#$ORPHAN_KEEP_DAYS))
   ((S3_CONNECTIONS >= 1)) || cfg_bad S3_CONNECTIONS "must be at least 1"
   ((RETRIES <= 10)) || cfg_bad RETRIES "at most 10"
   [[ $ACCOUNT_TIMEOUT =~ ^[0-9]+[smhd]?$ ]] || cfg_bad ACCOUNT_TIMEOUT "use e.g. 6h"
