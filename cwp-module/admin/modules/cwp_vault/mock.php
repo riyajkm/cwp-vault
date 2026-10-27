@@ -16,7 +16,7 @@ function vault_mock_data(array $a)
                 return ['account' => $n, 'result' => $res, 'started' => $iso($ago + $dur), 'finished' => $iso($ago),
                     'duration_s' => $dur, 'bytes_added' => $bytes, 'snapshots' => $snaps, 'error' => $err];
             };
-            return ['version' => '0.2.0', 'configured' => true,
+            return ['version' => '0.5.0', 'configured' => true,
                 'accounts' => [
                     $mk('alice', 'ok', 5 * 3600, 312, 148234567, 21),
                     $mk('bob', 'failed', 5 * 3600, 41, 0, 14, 'mysqldump failed for bob_shop'),
@@ -105,7 +105,7 @@ function vault_mock_data(array $a)
         case 'audit-download':
             return ['ok' => true];
         case 'version':
-            return ['version' => '0.2.0'];
+            return ['version' => '0.5.0'];
         default: // init, backup, prune, check, unlock
             return ['ok' => true];
     }

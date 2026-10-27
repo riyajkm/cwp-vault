@@ -6,7 +6,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 022
 
-INSTALLER_VERSION=0.2.0
+INSTALLER_VERSION=0.5.0
 VAULT_HOME=/usr/local/cwp-vault
 CWP_RES=/usr/local/cwpsrv/htdocs/resources/admin
 CRON_FILE=/etc/cron.d/cwp-vault

@@ -6,7 +6,7 @@ Encrypted, incremental, S3-compatible backups for CWP (Control Web Panel) server
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/riyajkm/cwp-vault?include_prereleases)](https://github.com/riyajkm/cwp-vault/releases)
 
-> **Status: v0.2.0 — early release.** Backup and restore are verified on a production CWP server
+> **Status: v0.5.0 — early release.** Backup and restore are verified on a production CWP server
 > (AlmaLinux 8, Contabo Object Storage). Test a restore on your own server before relying on it.
 
 ## Why
@@ -15,7 +15,7 @@ CWP's built-in "NEW Backup (beta)" is the only S3 option for CWP, and users repo
 breaking after updates, S3 credentials not saved, restore not listing S3 backups, temp files filling the
 root disk, and no retention. No open-source alternative exists. CWP Vault fills that gap.
 
-## Features (v0.2.0)
+## Features (v0.5.0)
 
 - One encrypted, incremental restic repository per account, plus one for server config (DNS, SSL, CWP config).
 - Home files, mail, and databases **streamed** into the backup (`mysqldump --single-transaction`, no temp files), plus the account record.
@@ -25,7 +25,14 @@ root disk, and no retention. No open-source alternative exists. CWP Vault fills 
 - Safe restores: never into live data by default, symlink-proof targets, setuid stripped, every restore audit-logged.
 - `vault` CLI for everything, with JSON output.
 
-Planned: object-lock (ransomware-proof) mode, restore into a live account, customer self-service restore, more notifiers.
+- **Immutable (ransomware-proof) mode** with S3 object lock, and `vault recover` to undo an attacker's deletions — tested end to end on Contabo.
+- **Restore into the live account** (type the account name to confirm; a safety backup is taken first), single-mailbox restore, background restores with progress.
+- **Download backups** as plain `.tar.gz` / `.sql.gz` or password-encrypted (GPG) files; admin-only signed links, auto-deleted after 24 h, audit-logged.
+- **Schedule editor** (server time and your local time side by side) and a live countdown to the next backup.
+- **Monthly automatic restore test** that imports every database into a throwaway copy and alerts on failure.
+- `install.sh --upgrade` and `--check`; restic download verified by pinned SHA-256 and GPG signature.
+
+Planned: customer self-service restore, more notifiers, a CWP-update compatibility test.
 
 ## Supported storage
 

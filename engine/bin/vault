@@ -4,7 +4,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-VAULT_VERSION=0.2.0
+VAULT_VERSION=0.5.0
 VAULT_SELF=$(readlink -f -- "${BASH_SOURCE[0]}")
 VAULT_LIB=${VAULT_LIB:-${VAULT_SELF%/*}/../lib}
 VAULT_HOME=${VAULT_HOME:-/usr/local/cwp-vault}
