@@ -76,6 +76,15 @@ aws_s3api() {
   return "$rc"
 }
 
+# aws_error_code ARGS... : the S3 <Code> of a failing call. Contabo sends errors with an empty
+# <Message>, which makes the AWS CLI crash ("'NoneType' is not ... iterable") instead of naming the
+# error, so read the code from the --debug response body.
+aws_error_code() {
+  env AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" AWS_PAGER='' \
+    AWS_DEFAULT_REGION=us-east-1 \
+    timeout 120 aws --endpoint-url "$S3_ENDPOINT" --debug s3api "$@" </dev/null 2>&1 >/dev/null | grep -o '<Code>[A-Za-z]*</Code>' | head -n 1 | sed 's/<[^>]*>//g' || true
+}
+
 # imm_init_check : refuse unless the bucket has the required lock; then merge in our lifecycle rule.
 imm_init_check() {
   local msg out="$VAULT_TMP/lifecycle.$$.json" res state raw=''
@@ -85,7 +94,8 @@ imm_init_check() {
   msg=$(printf '%s' "$AWS_OUT" | python3 -I -c "$PY_LOCKCHECK" "$LOCK_MODE" "$LOCK_DAYS" 2>&1) || die 2 "bucket $S3_BUCKET is not suitable for immutable mode: $msg"
   if aws_s3api get-bucket-lifecycle-configuration --bucket "$S3_BUCKET"; then
     raw=$AWS_OUT
-  elif [[ $AWS_ERR != *NoSuchLifecycleConfiguration* ]]; then
+  elif [[ $AWS_ERR != *NoSuchLifecycleConfiguration* ]] &&
+    [[ $(aws_error_code get-bucket-lifecycle-configuration --bucket "$S3_BUCKET") != NoSuchLifecycleConfiguration ]]; then
     die 2 "cannot read the lifecycle rules of $S3_BUCKET: ${AWS_ERR:-no answer}"
   fi
   res=$(printf '%s' "$raw" | python3 -I -c "$PY_LIFECYCLE" "$LIFECYCLE_ID" "${S3_PREFIX}vault/" "$((LOCK_DAYS + 7))") ||
