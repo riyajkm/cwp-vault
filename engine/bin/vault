@@ -39,10 +39,14 @@ source "$VAULT_LIB/storage.sh"
 source "$VAULT_LIB/admin.sh"
 # shellcheck source=../lib/immutable.sh
 source "$VAULT_LIB/immutable.sh"
+# shellcheck source=../lib/schedule.sh
+source "$VAULT_LIB/schedule.sh"
+# shellcheck source=../lib/export.sh
+source "$VAULT_LIB/export.sh"
 
 ARG_ACCOUNT='' ARG_ALL=0 ARG_DRY=0 ARG_JSON=0 ARG_SNAPSHOT=latest ARG_WHAT=''
 ARG_DB='' ARG_TARGET='' ARG_TARGET_DB='' ARG_TAIL='' ARG_QUIET=0 ARG_BEFORE='' ARG_YES=0
-ARG_DETACH=0 ARG_INPLACE=0 ARG_CONFIRM='' ARG_MAILBOX='' ARG_JOB='' ARG_ID=''
+ARG_DETACH=0 ARG_INPLACE=0 ARG_CONFIRM='' ARG_MAILBOX='' ARG_JOB='' ARG_ID='' ARG_ENCRYPT=0 ARG_TIME='' ARG_ENABLED=''
 declare -a ARG_POS=() ARG_PATHS=()
 VAULT_CMD=''
 declare -a VAULT_ARGS=()
@@ -71,6 +75,23 @@ EOF
       ;;
     jobs) echo "vault jobs [--json]               the last 20 restore jobs" ;;
     job) echo "vault job --id ID [--json]         one restore job (state, progress, result)" ;;
+    schedule) cat <<'EOF'
+vault schedule get [--json]
+vault schedule set [--time HH:MM] [--enabled yes|no] [--json]
+Reads or changes the nightly backup line of the cron file (server local time). Prune and check are shown, not changed.
+EOF
+      ;;
+    export) cat <<'EOF'
+vault export --account U --what files|db|mail [--snapshot ID|latest] [--path P] [--db NAME] [--mailbox user@domain]
+             [--encrypt] [--detach] [--json]
+Writes one archive (files and mail: .tar.gz, database: .sql.gz) to the exports folder for download.
+--encrypt reads the passphrase (12 to 256 characters) from the first line of stdin and writes <name>.gpg.
+EOF
+      ;;
+    exports) echo "vault exports [--json]          the exports waiting for download" ;;
+    export-clean) echo "vault export-clean [--quiet]    delete expired exports (hourly cron)" ;;
+    export-path) echo "vault export-path --job ID      print the file path of an export (for the web page to stream)" ;;
+    audit-download) echo "vault audit-download --job ID  record a download in the audit log" ;;
     snapshots) echo "vault snapshots --account U [--json]" ;;
     ls) echo "vault ls --account U [--snapshot ID] [--path P] --json    list one directory level of a snapshot" ;;
     prune) echo "vault prune --account U | --all [--quiet]" ;;
@@ -92,8 +113,8 @@ EOF
     version) echo "vault version" ;;
     *) cat <<'EOF'
 Usage: vault <command> [options]   (vault <command> --help for details)
-Commands: init backup restore jobs job snapshots ls prune check unlock recover status
-          test-storage verify-secrets config secrets log version
+Commands: init backup restore jobs job snapshots ls prune check unlock recover status schedule
+          export exports export-clean export-path audit-download test-storage verify-secrets config secrets log version
 Exit codes: 0 ok, 1 some accounts failed, 2 config/usage error, 3 already running, 4 storage unreachable
 EOF
       ;;
@@ -128,9 +149,10 @@ args_parse() {
       yes) ARG_YES=1 ;;
       detach) ARG_DETACH=1 ;;
       in-place) ARG_INPLACE=1 ;;
+      encrypt) ARG_ENCRYPT=1 ;;
       json) ARG_JSON=1 ;;
       quiet) ARG_QUIET=1 ;;
-      account | snapshot | what | path | db | target | target-db | tail | before | confirm | mailbox | job | id)
+      account | snapshot | what | path | db | target | target-db | tail | before | confirm | mailbox | job | id | time | enabled)
         if ((!has)); then
           (($# > 0)) || usage_err "$opt needs a value"
           val=$1
@@ -150,6 +172,8 @@ args_parse() {
           mailbox) ARG_MAILBOX=$val ;;
           job) ARG_JOB=$val ;;
           id) ARG_ID=$val ;;
+          time) ARG_TIME=$val ;;
+          enabled) ARG_ENABLED=$val ;;
           *) ;;
         esac
         ;;
@@ -186,7 +210,7 @@ main() {
   case $cmd in
     '' | -h | --help | help) help_text; exit 0 ;;
     version | --version) echo "cwp-vault $VAULT_VERSION"; exit 0 ;;
-    init | backup | restore | jobs | job | snapshots | ls | prune | check | unlock | recover | status | test-storage | verify-secrets | config | secrets | log) ;;
+    init | backup | restore | jobs | job | snapshots | ls | prune | check | unlock | recover | status | schedule | export | exports | export-clean | export-path | audit-download | test-storage | verify-secrets | config | secrets | log) ;;
     *) VAULT_CMD=''; usage_err "unknown command: $cmd" ;;
   esac
   for a in "$@"; do
@@ -199,6 +223,10 @@ main() {
     verify-secrets) args_parse "" "$@" ;;
     backup) args_parse "account all dry-run" "$@" ;;
     restore) args_parse "account snapshot what path db target target-db mailbox in-place confirm detach job dry-run json" "$@" ;;
+    schedule) args_parse "time enabled json pos" "$@" ;;
+    export) args_parse "account snapshot what path db mailbox encrypt detach job json" "$@" ;;
+    exports | export-clean) args_parse "json" "$@" ;;
+    export-path | audit-download) args_parse "job json" "$@" ;;
     jobs) args_parse "json" "$@" ;;
     job) args_parse "id json" "$@" ;;
     snapshots) args_parse "account json" "$@" ;;
@@ -225,6 +253,11 @@ main() {
     job) cmd_job; exit 0 ;;
     config) cmd_config; exit 0 ;;
     secrets) cmd_secrets; exit 0 ;;
+    schedule) cmd_schedule; exit 0 ;;
+    exports) cmd_exports; exit 0 ;;
+    export-clean) cmd_export_clean; exit 0 ;;
+    export-path) cmd_export_path; exit 0 ;;
+    audit-download) cmd_audit_download; exit 0 ;;
     *) ;;
   esac
 
@@ -233,6 +266,7 @@ main() {
     init) cmd_init || rc=$? ;;
     backup) if ((ARG_DRY)); then cmd_backup || rc=$?; else with_alerts cmd_backup || rc=$?; fi ;; # a dry run never pings or alerts
     restore) cmd_restore || rc=$? ;;
+    export) cmd_export || rc=$? ;;
     snapshots) cmd_snapshots || rc=$? ;;
     ls) cmd_ls || rc=$? ;;
     prune) with_alerts cmd_prune || rc=$? ;;

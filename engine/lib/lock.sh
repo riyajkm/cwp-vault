@@ -21,6 +21,9 @@ vault_paths() {
   HOME_ROOT=${VAULT_HOME_ROOT:-/home}
   VMAIL_ROOT=${VAULT_VMAIL_ROOT:-/var/vmail}
   RESTORE_ROOT=${VAULT_RESTORE_ROOT:-/var/lib/cwp-vault/restore}
+  EXPORT_ROOT=${VAULT_EXPORT_ROOT:-/var/lib/cwp-vault/exports}
+  VAULT_CRON_FILE=${VAULT_CRON_FILE:-/etc/cron.d/cwp-vault}
+  GPG_BIN=${VAULT_GPG:-gpg}
 }
 
 # var/ is 0750 root:root; log/status files are made 0640 where written.
