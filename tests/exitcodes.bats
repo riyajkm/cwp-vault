@@ -12,7 +12,7 @@ teardown() { vault_teardown; }
 @test "exit 0: version, help and no arguments" {
   run vault version
   [ "$status" -eq 0 ]
-  [ "$output" = "cwp-vault 0.2.0" ]
+  [ "$output" = "cwp-vault 0.5.0" ]
   run vault --help
   [ "$status" -eq 0 ]
   [[ $output == *"Exit codes"* ]]
