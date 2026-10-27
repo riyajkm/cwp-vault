@@ -110,6 +110,50 @@ databases restore into `--target-db` (required; refuses an existing non-empty DB
 0  4 * * 3  root /usr/local/bin/vault check --all
 ```
 
+## Security rules (from the v0.2 threat review)
+
+What v0.2 protects against: disk loss, accidental deletion, a compromised customer account,
+a bad update. It does **not** protect against root on this host deleting backups — that needs the
+no-delete key / object-lock mode planned for v0.3 (object lock verified working on Contabo in Stage 0).
+
+**Input validation (one function each, used by every command):**
+- account `^[a-z][a-z0-9_]{0,31}$`; database `^<account>_[A-Za-z0-9_]{1,56}$` (must belong to the account);
+  domain: hostname regex (`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`) before
+  building any `/var/vmail/<domain>` path; restore path: absolute, no `..`, no newline, restic glob chars escaped,
+  passed only as `--include` after option parsing.
+- Config parser rejects values containing `$(`, backticks, newlines or NUL; caps value length at 1024.
+  `ALERT_EMAIL` must be a single plain address (no newline, comma or header text); mail built with fixed headers.
+- `S3_ENDPOINT`, `ALERT_WEBHOOK`, `HEARTBEAT_URL` must be `https://` (`ALLOW_INSECURE=yes` overrides the endpoint only).
+
+**Restore safety:**
+- Default target: a fresh `0700` root dir `/var/lib/cwp-vault/restore/<timestamp>-<account>`. A user-given
+  `--target` must not exist or be empty, is resolved with `realpath`, and is refused if any path component is a
+  symlink or it lies under `/home`, `/etc`, `/root`, `/usr`, `/var/lib/mysql` or `/`. `--in-place` is not in v0.2.
+- After a files restore: strip setuid/setgid (`chmod -R ug-s`) in the target.
+- DB restore: into `--target-db` that must not exist (created by the engine); dumps are piped through a filter that
+  removes `DEFINER=` clauses.
+- Every restore appends one line to `var/log/audit.log` (time, account, snapshot, what, path/db, target).
+
+**Secrets and files:** entry point sets `umask 077`; `var/` is `0750 root:root`, files `0640`; secrets passed to
+children only via environment, never on a command line; restic and mysqldump command lines are never logged.
+`meta/account.json` holds no password hashes; postfix mailbox/alias rows go to a separate `meta/mailauth.json`
+(admin-only). Webhook payload: counts and failed account names only; `error` text capped at 300 chars with paths
+scrubbed. curl uses `--max-time 20 --proto =https` and no redirects.
+
+**Reliability:** per-account lock `var/lock/<account>.lock`; global lock only for `prune`/`check`/`unlock`;
+`restic unlock` runs only when no other `vault` process is alive. Every restic call is wrapped in `timeout`
+(`ACCOUNT_TIMEOUT`, default `6h`). Abort if free space on the cache or restore filesystem is below `MIN_FREE_GB`
+(default `5`). A DB whose dump or upload failed is recorded as failed and its snapshot (if one was created) is
+forgotten. MyISAM tables are not consistent under `--single-transaction`; documented, `--lock-tables` used when a
+database has MyISAM tables.
+
+**Password safety:** `vault verify-secrets` confirms every repo opens with the current password. The install guide
+tells the admin to store the restic password offline — losing it makes all backups unreadable.
+
+Deferred (tracked): no-delete cron key + object-lock immutable mode (v0.3), per-repo restic keys (v0.3),
+GPG-verified restic download (v0.3 installer), PHP↔engine job-queue contract (v0.4), deleted-account repo
+retention (v0.3), customer restore isolation (v1.x).
+
 ## Code rules
 
 - `set -Eeuo pipefail`, `IFS=$'\n\t'`; quote everything; arrays for command arguments; no `eval`.
