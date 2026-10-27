@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+# shellcheck disable=SC2034,SC2119,SC2120 # sourced by bats: LIB and conf_with are used from the .bats files
 # Shared bats helpers. Each test gets a throwaway VAULT_HOME, fake /home and /var/vmail trees,
 # and PATH stubs for restic, mysql, mysqldump, sendmail and curl (tests/stubs/*).
 # No bats-support/bats-assert needed: plain [ ] asserts and `run`.
