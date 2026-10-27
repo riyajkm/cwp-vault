@@ -1,9 +1,13 @@
 <?php
 // CWP Vault - shared glue: engine runner, validation, CSRF, AJAX handlers.
 // Included by modules/cwp_vault.php and addons/ajax/ajax_cwp_vault.php.
-if (!isset($include_path)) { echo "invalid access"; exit(); }
+// Loaded only by CWP: the page loader sets $include_path, the AJAX loader (loader_ajax.php) sets $ajax_file.
+// Both run after CWP's own admin login check; we still require a logged-in admin session.
+if (!isset($include_path) && !isset($ajax_file)) { echo "invalid access"; exit(); }
+if (empty($_SESSION['logged']) || empty($_SESSION['token'])) { http_response_code(403); echo "admin login required"; exit(); }
 if (defined('CWP_VAULT_LIB')) { return; }
 define('CWP_VAULT_LIB', 1);
+const VAULT_PENDING_PW = '/usr/local/cwp-vault/var/wizard.pending';
 
 const VAULT_BIN = '/usr/local/bin/vault';
 const VAULT_CRON = '/etc/cron.d/cwp-vault';
@@ -11,7 +15,20 @@ const VAULT_RE_ACCOUNT = '/^[a-z][a-z0-9_]{0,31}$/';
 const VAULT_RE_SNAPSHOT = '/^[a-f0-9]{8,64}$/';
 const VAULT_RE_DBANY = '/^[a-z][a-z0-9_]{0,31}_[A-Za-z0-9_]{1,56}$/';
 
-if (session_status() !== PHP_SESSION_ACTIVE) { @session_start(); }
+// CWP manages its own session; never start or write one here.
+
+// Generated restic password waiting for "I saved it": set with a value, read without. 0600 root, 15 min.
+function vault_pending_pw(?string $set = null)
+{
+    if ($set !== null) {
+        $old = umask(077);
+        $ok = @file_put_contents(VAULT_PENDING_PW, $set, LOCK_EX) !== false;
+        umask($old);
+        return $ok;
+    }
+    if (!is_file(VAULT_PENDING_PW) || time() - (int)@filemtime(VAULT_PENDING_PW) > 900) { @unlink(VAULT_PENDING_PW); return ''; }
+    return (string)@file_get_contents(VAULT_PENDING_PW);
+}
 
 // ---------- strings ----------
 function vault_lang(): array
@@ -28,8 +45,8 @@ function vault_json($v): string { return json_encode($v, JSON_HEX_TAG | JSON_HEX
 // ---------- CSRF ----------
 function vault_csrf(): string
 {
-    if (empty($_SESSION['cwp_vault_csrf'])) { $_SESSION['cwp_vault_csrf'] = bin2hex(random_bytes(32)); }
-    return $_SESSION['cwp_vault_csrf'];
+    // Derived from CWP's per-login session token, so it is stable for the login without writing to the session.
+    return hash_hmac('sha256', 'cwp_vault_csrf', (string)$_SESSION['token']);
 }
 function vault_csrf_ok(): bool
 {
@@ -329,16 +346,18 @@ function vault_dispatch(string $acc): void
             $s = vault_run(['secrets', 'status', '--json']);
             if (is_array($s['data']) && !empty($s['data']['password_set'])) { vault_out(false, null, 'A backup password is already set.'); }
             $pw = rtrim(strtr(base64_encode(random_bytes(24)), '+/', '-_'), '=');
-            $_SESSION['cwp_vault_pw'] = $pw; // shown once; the commit step reads it from here, the browser never posts it back
+            // Shown once; kept root-only on disk (CWP's AJAX loader has no writable PHP session) so the
+            // browser never posts it back. Expires after 15 minutes.
+            if (!vault_pending_pw($pw)) { vault_out(false, null, 'Could not prepare the password'); }
             vault_out(true, ['password' => $pw]);
 
         case 'wizard_commit':
-            $pw = $_SESSION['cwp_vault_pw'] ?? '';
+            $pw = vault_pending_pw();
             if (vault_str('ack') !== '1') { vault_out(false, null, 'Confirm that you saved the password.'); }
             if (!is_string($pw) || !preg_match('/^[A-Za-z0-9_-]{32}$/', $pw)) { vault_out(false, null, 'No generated password. Generate one first.'); }
             $r = vault_run(['secrets', 'set'], "RESTIC_PASSWORD=$pw\n");
             if (!$r['ok']) { vault_out(false, null, 'Could not store the password'); }
-            unset($_SESSION['cwp_vault_pw']);
+            @unlink(VAULT_PENDING_PW);
             vault_out(true, ['ok' => true]);
 
         case 'init':

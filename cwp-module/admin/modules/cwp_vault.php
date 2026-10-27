@@ -3,7 +3,7 @@ if(!isset($include_path)){echo "invalid access";exit();}
 // CWP Vault admin page. Engine calls and AJAX handlers live in cwp_vault/lib.php.
 require_once __DIR__ . '/cwp_vault/lib.php';
 if (isset($_GET['acc']) && is_string($_GET['acc'])) { vault_dispatch($_GET['acc']); } // router fallback: same handlers as the ajax file
-$cv = ['url' => 'index.php?module=cwp_vault', 'csrf' => vault_csrf(), 't' => vault_lang(), 'mock' => vault_mock()];
+$cv = ['url' => 'loader_ajax.php?ajax=cwp_vault', 'csrf' => vault_csrf(), 't' => vault_lang(), 'mock' => vault_mock()];
 $T = vault_lang();
 $tx = function ($k) use ($T) { return h($T[$k] ?? $k); };
 ?>
