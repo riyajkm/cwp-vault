@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `vault verify-restore [--account U | --all] [--json]`: automatic restore test (random files restored and
+  size-checked, every database imported into a throwaway database and its table count compared); result in
+  `var/status/verify-<account>.json`, `last_verify` in `vault status --json`, failure alert, monthly cron line.
+- `vault orphans [--json] [--purge [--yes]]` and `ORPHAN_KEEP_DAYS` (default 30, 0 = never purge): list and purge
+  the repositories of deleted accounts; `vault prune --all` reports them.
 - Installer: restic `SHA256SUMS` is verified with gpg against the pinned release key fingerprint (temporary 0700
   GNUPGHOME) on top of the pinned per-arch SHA-256; missing gpg warns, `--strict` fails.
 - Installer: `--upgrade` (engine, module, missing cron lines merged without touching existing lines or the backup
@@ -23,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `vault status --json` reports `immutable`; admin module shows an "Immutable (MODE, N days)" badge and an
   "Immutable backups" settings group.
 - Docs: "Immutable backups" in `docs/INSTALL.md` (Contabo steps and recovery), engine spec section.
+
+### Changed
+
+- `vault recover` removes delete markers with `delete-objects` batches of up to 1000 instead of one call each; output is unchanged.
 
 ## [0.2.0] - 2026-10-28
 
