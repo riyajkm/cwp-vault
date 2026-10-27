@@ -51,6 +51,11 @@ status_obj() { # FILE
     "$(status_get "$1" duration_s)" "$(status_get "$1" bytes_added)" "$(status_snap_count "$1")" "$(status_get "$1" error)"
 }
 
+# status_never NAME : placeholder for an account that has no status file yet.
+status_never() {
+  printf '{"account":%s,"result":"never","started":null,"finished":null,"duration_s":0,"bytes_added":0,"snapshots":0,"error":null}' "$(json_str "$1")"
+}
+
 status_running() { # prints JSON objects separated by commas
   local f pid cmd started name first=1
   for f in "$VAULT_LOCK"/*.lock; do
@@ -67,8 +72,8 @@ status_running() { # prints JSON objects separated by commas
 }
 
 cmd_status() {
-  local f first=1 configured=false
-  local -a files=()
+  local f n first=1 configured=false
+  local -a files=() names=()
   for f in "$VAULT_STATUS"/*.json; do
     [[ -e $f ]] || continue
     case ${f##*/} in restore-*) continue ;; esac
@@ -77,10 +82,17 @@ cmd_status() {
   if [[ -f $VAULT_CONF && -f $VAULT_SECRETS ]] && (cfg_load) >/dev/null 2>&1; then configured=true; fi
   if [[ $ARG_JSON == 1 ]]; then
     printf '{"version":"%s","configured":%s,"accounts":[' "$VAULT_VERSION" "$configured"
-    for f in "${files[@]}"; do
-      [[ ${f##*/} == _server.json ]] && continue
+    # every discovered account (ACCOUNTS/EXCLUDE_ACCOUNTS applied); status files only if discovery fails
+    if [[ $configured == true ]] && n=$( (cfg_load && acct_discover) 2>/dev/null); then
+      mapfile -t names <<<"$n"
+    else
+      for f in "${files[@]}"; do names+=("${f##*/}"); done
+      names=("${names[@]%.json}")
+    fi
+    for n in "${names[@]}"; do
+      [[ -n $n && $n != _server ]] || continue
       if ((first)); then first=0; else printf ','; fi
-      status_obj "$f"
+      if [[ -f $VAULT_STATUS/$n.json ]]; then status_obj "$VAULT_STATUS/$n.json"; else status_never "$n"; fi
     done
     printf '],"server":'
     if [[ -f $VAULT_STATUS/_server.json ]]; then status_obj "$VAULT_STATUS/_server.json"; else printf 'null'; fi

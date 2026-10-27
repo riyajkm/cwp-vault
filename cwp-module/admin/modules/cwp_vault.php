@@ -92,7 +92,7 @@ window.CWPV = <?= vault_json($cv) ?>;
   }
   function when(iso) { var d = new Date(iso); return isNaN(d) ? esc(iso) : esc(d.toLocaleString()); }
   function badge(res) {
-    var m = {ok: ['success', '✔ ', 'R_OK'], failed: ['danger', '✖ ', 'R_FAILED'], running: ['info', '', 'R_RUNNING'], skipped: ['warning', '– ', 'R_SKIPPED'], never: ['default', '', 'R_NEVER']}[res] || ['default', '', 'R_NEVER'];
+    var m = {ok: ['success', '✔ ', 'R_OK'], failed: ['danger', '✖ ', 'R_FAILED'], running: ['info', '', 'R_RUNNING'], skipped: ['warning', '– ', 'R_SKIPPED'], never: ['default', '○ ', 'R_NEVER']}[res] || ['default', '○ ', 'R_NEVER'];
     return '<span class="label label-' + m[0] + '">' + (res === 'running' ? '<span class="cv-spin" aria-hidden="true"></span> ' : m[1]) + esc(tt(m[2])) + '</span>';
   }
   function alertBox(type, msg) { return '<div class="alert alert-' + type + '" role="alert">' + esc(msg) + '</div>'; }
@@ -133,7 +133,7 @@ window.CWPV = <?= vault_json($cv) ?>;
     var okN = accts.filter(function (a) { return a.result === 'ok'; }).length, failN = accts.filter(function (a) { return a.result === 'failed'; }).length;
     var sum = accts.reduce(function (s, a) { return s + (+a.bytes_added || 0); }, 0);
     var last = accts.concat(st.server ? [st.server] : []).filter(function (a) { return a.finished; }).sort(function (a, b) { return a.finished < b.finished ? 1 : -1; })[0];
-    var next = S.sched && S.sched.next ? when(S.sched.next) : (S.sched && S.sched.lines && S.sched.lines[0] ? esc(S.sched.lines[0]) : esc(tt('NEVER')));
+    var next = S.sched && S.sched.next ? when(S.sched.next) : esc(tt('NOT_SCHEDULED'));
     var anyRun = (st.running || []).length > 0;
     function tile(n, l) { return '<div class="col-sm-3 col-xs-6"><div class="panel panel-default"><div class="panel-body cv-tile"><div class="cv-num">' + n + '</div><div class="cv-lbl">' + esc(tt(l)) + '</div></div></div></div>'; }
     h += '<div class="row">' + tile(okN + ' / ' + accts.length, 'T_ACCOUNTS') +
@@ -146,8 +146,8 @@ window.CWPV = <?= vault_json($cv) ?>;
     accts.forEach(function (a) {
       var run = runningFor(a.account), res = run ? 'running' : (a.finished ? a.result : 'never');
       h += '<tr><td>' + esc(a.account) + '</td><td>' + ago(a.finished) + '</td><td>' + badge(res) +
-        (a.error && res === 'failed' ? '<br><small class="text-danger">' + esc(a.error) + '</small>' : '') + '</td><td>' + esc(dur(a.duration_s)) + '</td><td>' +
-        esc(bytes(a.bytes_added)) + '</td><td>' + esc(a.snapshots == null ? '-' : a.snapshots) + '</td><td>' +
+        (a.error && res === 'failed' ? '<br><small class="text-danger">' + esc(a.error) + '</small>' : '') + '</td><td>' + esc(a.finished ? dur(a.duration_s) : '-') + '</td><td>' +
+        esc(a.finished ? bytes(a.bytes_added) : '-') + '</td><td>' + esc(!a.finished || a.snapshots == null ? '-' : a.snapshots) + '</td><td>' +
         '<button type="button" class="btn btn-primary btn-xs" data-act="backup" data-acc="' + esc(a.account) + '"' + (anyRun ? ' disabled' : '') + '>' + esc(tt('BTN_BACKUP')) + '</button> ' +
         '<button type="button" class="btn btn-default btn-xs" data-act="snaps" data-acc="' + esc(a.account) + '">' + esc(tt('BTN_SNAPS')) + '</button></td></tr>';
     });

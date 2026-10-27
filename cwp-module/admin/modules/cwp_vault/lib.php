@@ -241,7 +241,7 @@ function vault_schedule(): array
         if ($l === '' || $l[0] === '#' || strlen($l) > 300) { continue; }
         $lines[] = $l;
         // shortcut: only "M H * * *" daily lines are turned into a next-run time; others show as text.
-        if ($next === null && strpos($l, ' backup') !== false && preg_match('/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*\s/', $l, $m) && $m[1] < 60 && $m[2] < 24) {
+        if ($next === null && preg_match('~^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*\s+root\s+/usr/local/bin/vault\s+backup\b~', $l, $m) && $m[1] < 60 && $m[2] < 24) {
             $t = mktime((int)$m[2], (int)$m[1], 0);
             if ($t <= time()) { $t += 86400; }
             $next = date('c', $t);

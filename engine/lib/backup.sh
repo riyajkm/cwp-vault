@@ -224,7 +224,7 @@ targets_resolve() {
 }
 
 cmd_backup() {
-  local a fd rc=0 lockinfo=''
+  local a fd rc=0
   [[ -n $ARG_ACCOUNT || $ARG_ALL == 1 ]] || usage_err "backup needs --account U or --all"
   [[ -z $ARG_ACCOUNT || $ARG_ALL != 1 ]] || usage_err "use --account or --all, not both"
   targets_resolve 1
@@ -235,14 +235,13 @@ cmd_backup() {
   lock_take "$VAULT_LOCK/vault.lock" s || die 3 "prune/check/unlock is running"
   if [[ $ARG_ALL == 1 ]]; then
     lock_take "$VAULT_LOCK/all.lock" x || die 3 "another --all run is active"
-    lockinfo=noinfo
   fi
   if ! check_free_gb "$VAULT_CACHE"; then
     RUN_ERROR="not enough free disk space"
     return 1
   fi
   for a in "${TARGETS[@]}"; do
-    if ! lock_take "$VAULT_LOCK/$a.lock" x $lockinfo; then
+    if ! lock_take "$VAULT_LOCK/$a.lock" x; then
       if [[ -n $ARG_ACCOUNT ]]; then die 3 "$a is already being processed"; fi
       log_warn "$a is busy; skipped"
       status_write "$a" "$(log_ts)" "$(date +%s)" skipped 0 0 0 "another vault process holds the lock"

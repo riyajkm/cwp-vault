@@ -50,7 +50,7 @@ lock_take() {
   LOCK_LAST_FD=$fd
   LOCK_FDS+=("$fd")
   # who holds it (read by "vault status" for the running list); exclusive locks only
-  if [[ $2 == x && ${3:-} != noinfo ]]; then printf '%s %s %s\n' "$$" "${VAULT_CMD:-vault}" "$(log_ts)" >"/proc/self/fd/$fd" 2>/dev/null || true; fi
+  if [[ $2 == x ]]; then printf '%s %s %s\n' "$$" "${VAULT_CMD:-vault}" "$(log_ts)" >"/proc/self/fd/$fd" 2>/dev/null || true; fi
 }
 
 lock_release() {
