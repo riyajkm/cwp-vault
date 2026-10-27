@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `vault status --json` reports `immutable`; admin module shows an "Immutable (MODE, N days)" badge and an
   "Immutable backups" settings group.
 - Docs: "Immutable backups" in `docs/INSTALL.md` (Contabo steps and recovery), engine spec section.
+- `vault schedule get|set`: reads and changes the nightly backup time and on/off in the cron file (atomic rewrite of that one
+  line, everything else kept); `vault status --json` gains `schedule` and `now_epoch`.
+- Downloads: `vault export --what files|db|mail [--encrypt]` builds a `.tar.gz` / `.sql.gz` (`.gpg` with a passphrase read from
+  stdin) in `/var/lib/cwp-vault/exports/`, as a detachable job; `vault exports`, `vault export-clean`, `vault export-path`,
+  `vault audit-download`; config key `EXPORT_KEEP_HOURS` (default 24, 1-720); hourly `export-clean` cron line.
+
+### Fixed
+
+- In-place mail restore copies as the owner of `/var/vmail/<domain>` (`runuser`), not as root.
+- Restore workers run restic with `RESTIC_PROGRESS_FPS=0.5` instead of 0.016 (less log and job-file churn).
+- Jobs record the worker pid; `vault jobs` / `vault job` mark a `running` job as `failed` when that process is gone.
 
 ## [0.2.0] - 2026-10-28
 

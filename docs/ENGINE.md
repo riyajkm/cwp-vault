@@ -1,4 +1,4 @@
-# Engine specification (v0.2.0)
+# Engine specification (v0.2.0, with the unreleased schedule, download and restore-v2 additions)
 
 The engine is a bash program run as root. It owns every backup, restore, check and prune. The CWP
 module (later) only calls it. Target: bash ≥ 4.4 on AlmaLinux/Rocky 8–9, restic ≥ 0.17.
@@ -41,6 +41,7 @@ All paths come from `VAULT_HOME` (default `/usr/local/cwp-vault`) so tests can p
 | `IMMUTABLE` | `no` | `yes` turns on immutable (object lock) mode; see "Immutable mode" below |
 | `LOCK_MODE` | `COMPLIANCE` | `COMPLIANCE` or `GOVERNANCE`; must equal the bucket's default retention mode |
 | `LOCK_DAYS` | `14` | 1-3650; the bucket's default retention must be at least this many days |
+| `EXPORT_KEEP_HOURS` | `24` | 1-720; how long a download made by `vault export` is kept before `vault export-clean` deletes it |
 
 Unknown keys → warning. Values are validated (bucket/endpoint/prefix charset, numbers, yes/no).
 Default excludes: `*/cache/*`, `*/.cache/*`, `*/tmp/*`, `*/.trash/*`, `*/error_log`, `*/core.[0-9]*`.
@@ -81,8 +82,15 @@ vault backup [--account U|--all] [--dry-run]
 vault restore --account U [--snapshot ID|latest] --what files|db|mail|meta [--path P] [--db NAME]
               [--mailbox user@domain] [--target DIR | --target-db NAME] [--dry-run] [--detach]
 vault restore --account U --snapshot ID --what files|db|mail --in-place --confirm U [--detach] ...
-vault jobs [--json]              # last 20 restore jobs
-vault job --id ID --json         # one restore job
+vault jobs [--json]              # last 20 restore/export jobs
+vault job --id ID --json         # one restore/export job
+vault schedule get|set [--time HH:MM] [--enabled yes|no] [--json]   # the nightly backup line of the cron file
+vault export --account U --what files|db|mail [--snapshot ID|latest] [--path P] [--db NAME] [--mailbox user@domain]
+             [--encrypt] [--detach] [--json]                        # one downloadable archive
+vault exports [--json]           # exports waiting for download
+vault export-clean [--quiet]     # delete expired exports (hourly cron)
+vault export-path --job ID       # absolute path of an export (validated), for the page to stream
+vault audit-download --job ID    # record a download in the audit log
 vault snapshots --account U      # list (JSON with --json)
 vault prune [--account U|--all]  # forget --keep-* --prune
 vault check [--account U|--all]  # check --read-data-subset
@@ -114,6 +122,7 @@ into a new `--target-db`. Writing into the live account needs `--in-place` (see 
 30 1 * * *  root /usr/local/bin/vault backup --all
 0  4 * * 0  root /usr/local/bin/vault prune --all
 0  4 * * 3  root /usr/local/bin/vault check --all
+7  * * * *  root /usr/local/bin/vault export-clean --quiet
 ```
 
 ## Admin module ↔ engine contract
@@ -148,6 +157,46 @@ the final file holds the usual result fields (`ok,job,target,files,bytes,duratio
 `vault jobs --json` returns the last 20 job files (newest first) as an array; `vault job --id ID --json` returns one
 (exit 2 for a bad or unknown id). Without `--detach` the restore runs in the foreground and prints the result as before.
 A dry run never queues a job.
+
+**Worker pid.** Every progress record of a job carries `pid` (the worker) and `kind` (`restore` or `export`). `vault jobs`
+and `vault job` mark a `running` job as `failed` (`ok:false`, "the worker stopped before it finished") when that pid no longer
+exists, so a killed or rebooted worker never shows as running forever. Job workers run restic with `RESTIC_PROGRESS_FPS=0.5`
+(foreground commands keep the restic default of `0.016`). An in-place mail restore copies as the owner of `/var/vmail/<domain>`
+(`runuser -u <owner>`), never as root.
+
+## Schedule and downloads
+
+**Schedule.** `vault schedule get --json` reads the `vault backup|prune|check --all` lines of `/etc/cron.d/cwp-vault`
+(`VAULT_CRON_FILE` overrides the path in tests) and prints
+`{"backup":{"enabled","time":"HH:MM"},"prune":{"day","time"},"check":{"day","time"},"timezone","utc_offset","now_epoch","next_run","next_run_epoch"}`.
+All times are server local time, because cron runs in server time. A commented backup line (as the installer leaves it)
+reads as `enabled:false`; `next_run` and `next_run_epoch` are `null` then. `vault schedule set [--time HH:MM] [--enabled yes|no]`
+validates `^([01][0-9]|2[0-3]):[0-5][0-9]$`, rewrites only the backup line through a temp file in the same folder and a rename
+(mode `0644`; every other line and comment is kept), creates the line when it is missing, appends one line to the audit log and
+prints the same JSON. Prune and check are shown, not changed. `vault status --json` carries the same object as `schedule`
+and a top-level `now_epoch`.
+
+**Exports.** `vault export` streams one snapshot item out of restic into `/var/lib/cwp-vault/exports/` (`VAULT_EXPORT_ROOT`;
+folder `0700`, files `0600`): files and mail as `restic dump --archive tar | gzip` (`<job>.tar.gz`; a single-file `--path` is
+dumped as that file's bytes), a database as the dump of `/db/<name>.sql` (`<job>.sql.gz`). `--path` is optional, at most one,
+and must be inside the account's home; mail needs `--mailbox user@domain` (the domain must belong to the account); `--db` must
+start with `<account>_`. `--snapshot` defaults to `latest` (tag filter, as for restore). The export is a job of kind `export`
+(same job ids, `--detach`, `vault job --id`, progress in `percent`/`bytes_done` as output bytes against the snapshot size).
+The result is `{"ok","job","file","bytes","sha256","encrypted","expires","error"}`; the file is built as `<name>.part` and only
+renamed when complete, and a failed export leaves nothing behind. The record `<job>.json` beside the file
+(`{"job","account","what","file","bytes","encrypted","created","expires"}`) is what `vault exports --json` lists.
+It needs `MIN_FREE_GB` free on the exports filesystem. Every export and every download is appended to the audit log.
+
+`--encrypt` reads the passphrase (12 to 256 characters, no control characters) from the first line of **stdin**; it never
+appears in argv, the environment, the log or a job file (a detached export hands it to the worker on the worker's stdin through a
+pipe). gpg gets it on file descriptor 3 (`--batch --yes --pinentry-mode loopback --passphrase-fd 3 --symmetric --cipher-algo AES256`),
+because descriptor 0 carries the data; the file gets a `.gpg` suffix. Without `gpg` the command exits 2 with "gpg not installed".
+
+`vault export-clean` deletes exports whose `expires` has passed (default `EXPORT_KEEP_HOURS`=24), records whose file is gone, and
+leftovers without a record older than the keep time; the hourly cron line runs it. `vault export-path --job ID` validates the
+job id and the record, refuses an expired export, a record naming anything but a plain file name, a symlink, or a file outside the
+exports folder, and prints the absolute path (exit 2 otherwise). `vault audit-download --job ID` validates the same way and appends
+the download to the audit log. The web page downloads through these two verbs and never builds a path itself.
 
 ## Immutable mode (v0.3)
 
