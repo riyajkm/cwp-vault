@@ -7,7 +7,7 @@
 # STUB_LS_FAIL=1 (ls fails). orphans: STUB_SNAP_DAY=YYYY-MM-DD (day of every snapshot time, default 2026-01-01).
 mkdir -p "$STUB_LOG/stdin"
 printf '%s | %s\n' "${RESTIC_REPOSITORY:-}" "$*" >>"$STUB_LOG/restic.log"
-printf 'pw_in_env=%s key_in_env=%s\n' "${RESTIC_PASSWORD:+yes}" "${AWS_ACCESS_KEY_ID:+yes}" >>"$STUB_LOG/restic.env.log"
+printf 'pw_in_env=%s key_in_env=%s fps=%s\n' "${RESTIC_PASSWORD:+yes}" "${AWS_ACCESS_KEY_ID:+yes}" "${RESTIC_PROGRESS_FPS:-}" >>"$STUB_LOG/restic.env.log"
 args=("$@")
 sub='' fname='' stdin=0 target='' i=0
 declare -a incs=()
@@ -60,6 +60,7 @@ case $sub in
     echo data >"$target/suid.bin"
     chmod 4755 "$target/suid.bin" 2>/dev/null || true ;;
   dump)
+    if [[ -n ${STUB_DUMP_FAIL:-} ]]; then echo "Fatal: dump failed" >&2; exit 1; fi
     if [[ ${args[*]} == */probe/probe.txt* ]]; then cat "$STUB_LOG/last_stdin"; exit 0; fi
     printf 'CREATE TABLE t (id int);\nCREATE DEFINER=`root`@`localhost` PROCEDURE p() BEGIN END;\n' ;;
   snapshots)

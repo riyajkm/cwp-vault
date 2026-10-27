@@ -96,7 +96,8 @@ cmd_status() {
     done
     printf '],"server":'
     if [[ -f $VAULT_STATUS/_server.json ]]; then status_obj "$VAULT_STATUS/_server.json"; else printf 'null'; fi
-    printf ',"running":[%s],"immutable":%s,"last_verify":%s}\n' "$(status_running)" "$(imm_status_json)" "$(status_last_verify)"
+    printf ',"running":[%s],"immutable":%s,"last_verify":%s,"now_epoch":%d,"schedule":%s}
+' "$(status_running)" "$(imm_status_json)" "$(status_last_verify)" "$(date +%s)" "$(sch_json)"
     return 0
   fi
   if ((${#files[@]} == 0)); then
