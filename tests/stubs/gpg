@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Test stub for gpg --symmetric: logs argv to $STUB_LOG/gpg.log, reads the passphrase from fd 3 (only its length is
+# kept in gpg.pass), and "encrypts" stdin into the --output file behind a marker line.
+mkdir -p "$STUB_LOG"
+printf '%s\n' "$*" >>"$STUB_LOG/gpg.log"
+out='' prev=''
+for a in "$@"; do
+  if [[ $prev == --output ]]; then out=$a; fi
+  prev=$a
+done
+pass=''
+read -r pass <&3 || true
+printf 'len=%d\n' "${#pass}" >>"$STUB_LOG/gpg.pass"
+{ echo GPGSTUB; cat; } >"$out"

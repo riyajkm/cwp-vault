@@ -46,8 +46,24 @@ ALERT_WEBHOOK=
 # healthchecks-style URL: /start at the beginning, the URL itself on success, /fail on failure.
 HEARTBEAT_URL=
 
+# --- Deleted accounts ---
+# "vault orphans --purge" thins the backup history of an account that no longer exists in CWP once its newest
+# snapshot is older than this many days. 0 = never purge.
+ORPHAN_KEEP_DAYS=30
+
 # --- Reliability ---
 # Retries of a failed restic call, with waits of 30 s, 120 s, 300 s.
 RETRIES=3
 # yes allows an http:// S3_ENDPOINT. Only for local testing; never for real data.
 ALLOW_INSECURE=no
+
+# --- Immutable backups (ransomware protection; see docs/INSTALL.md) ---
+# yes needs a NEW bucket created with Object Lock and a default retention, plus the aws CLI v2 on this server.
+IMMUTABLE=no
+# COMPLIANCE (cannot be bypassed by anyone) or GOVERNANCE (testing only). Must match the bucket default retention.
+LOCK_MODE=COMPLIANCE
+# 1-3650. The bucket default retention must be at least this long. Deleted data is kept for this long plus 7 days.
+LOCK_DAYS=14
+
+# Hours a downloadable export is kept before "vault export-clean" deletes it (1-720).
+EXPORT_KEEP_HOURS=24

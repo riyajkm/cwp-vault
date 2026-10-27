@@ -16,14 +16,15 @@ function vault_mock_data(array $a)
                 return ['account' => $n, 'result' => $res, 'started' => $iso($ago + $dur), 'finished' => $iso($ago),
                     'duration_s' => $dur, 'bytes_added' => $bytes, 'snapshots' => $snaps, 'error' => $err];
             };
-            return ['version' => '0.2.0', 'configured' => true,
+            return ['version' => '0.5.0', 'configured' => true,
                 'accounts' => [
                     $mk('alice', 'ok', 5 * 3600, 312, 148234567, 21),
                     $mk('bob', 'failed', 5 * 3600, 41, 0, 14, 'mysqldump failed for bob_shop'),
                     $mk('carol', 'ok', 5 * 3600, 95, 20481234, 9),
                 ],
                 'server' => $mk('_server', 'ok', 5 * 3600 + 500, 33, 3123456, 7),
-                'running' => []];
+                'schedule' => vault_mock_schedule($now), 'now_epoch' => $now,
+                'running' => [], 'immutable' => ['enabled' => true, 'mode' => 'COMPLIANCE', 'days' => 14]];
         case 'snapshots':
             if (!$acct) { return ['error' => 'account required', 'code' => 2]; }
             $out = [];
@@ -64,7 +65,7 @@ function vault_mock_data(array $a)
                 'BACKUP_MAIL' => 'yes', 'BACKUP_DATABASES' => 'yes', 'BACKUP_SERVER' => 'yes',
                 'KEEP_DAILY' => '7', 'KEEP_WEEKLY' => '4', 'KEEP_MONTHLY' => '3',
                 'S3_CONNECTIONS' => '4', 'LIMIT_UPLOAD_KIB' => '0',
-                'ALERT_EMAIL' => 'admin@example.com', 'ALERT_WEBHOOK' => '', 'HEARTBEAT_URL' => ''];
+                'ALERT_EMAIL' => 'admin@example.com', 'ALERT_WEBHOOK' => '', 'HEARTBEAT_URL' => '', 'IMMUTABLE' => 'yes', 'LOCK_MODE' => 'COMPLIANCE', 'LOCK_DAYS' => '14'];
         case 'secrets':
             if (($a[1] ?? '') === 'set') { return ['ok' => true]; }
             return ['s3_key_set' => true, 'access_key_hint' => '…ABCD', 'password_set' => true];
@@ -77,13 +78,48 @@ function vault_mock_data(array $a)
             return $lines;
         case 'test-storage':
             return ['ok' => true, 'write_ms' => 412, 'read_ms' => 188, 'delete_ms' => 95, 'error' => null];
+        case 'jobs':
+            return [['job' => gmdate('Ymd\THis\Z', $now - 600) . '-demo', 'state' => 'done', 'ok' => true, 'account' => 'demo', 'what' => 'files',
+                'target' => '/var/lib/cwp-vault/restore/demo', 'files' => 1284, 'bytes' => 734003200, 'duration_s' => 38, 'error' => '', 'percent' => 100]];
+        case 'job':
+            return ['job' => $a[2], 'kind' => 'export', 'file' => 'demo-files.tar.gz', 'encrypted' => false, 'expires' => gmdate('Y-m-d\TH:i:s\Z', $now + 86400), 'state' => 'done', 'ok' => true, 'account' => 'demo', 'what' => 'files', 'target' => '/var/lib/cwp-vault/restore/demo',
+                'files' => 1284, 'bytes' => 734003200, 'duration_s' => 38, 'error' => '', 'percent' => 100, 'in_place' => in_array('--in-place', $a, true), 'safety_snapshots' => ['deadbeef']];
         case 'restore':
+            if (in_array('--detach', $a, true)) { return ['job' => gmdate('Ymd\THis\Z', $now) . "-$acct"]; }
             return ['ok' => true, 'job' => gmdate('YmdHis', $now) . '-' . $acct,
                 'target' => '/var/lib/cwp-vault/restore/' . gmdate('YmdHis', $now) . "-$acct",
                 'files' => 1284, 'bytes' => 734003200, 'duration_s' => 38, 'error' => null];
+        case 'schedule':
+            $t = null; $en = 'yes';
+            foreach ($a as $i => $v) { if ($v === '--time' && isset($a[$i + 1])) { $t = $a[$i + 1]; } if ($v === '--enabled' && isset($a[$i + 1])) { $en = $a[$i + 1]; } }
+            return vault_mock_schedule($now, $t ?: '01:30', $en === 'yes');
+        case 'export':
+            return ['job' => gmdate('Ymd\THis\Z', $now) . "-$acct"];
+        case 'exports':
+            return [
+                ['job' => gmdate('Ymd\THis\Z', $now - 3600) . '-alice', 'account' => 'alice', 'what' => 'files', 'file' => 'alice-files.tar.gz.gpg', 'bytes' => 734003200, 'encrypted' => true, 'created' => $iso(3600), 'expires' => gmdate('Y-m-d\TH:i:s\Z', $now + 23 * 3600)],
+                ['job' => gmdate('Ymd\THis\Z', $now - 7200) . '-bob', 'account' => 'bob', 'what' => 'db', 'file' => 'bob-bob_shop.sql.gz', 'bytes' => 12345678, 'encrypted' => false, 'created' => $iso(7200), 'expires' => gmdate('Y-m-d\TH:i:s\Z', $now + 22 * 3600)],
+            ];
+        case 'export-path':
+            return '/var/lib/cwp-vault/exports/mock-export.tar.gz';
+        case 'audit-download':
+            return ['ok' => true];
         case 'version':
-            return ['version' => '0.2.0'];
+            return ['version' => '0.5.0'];
         default: // init, backup, prune, check, unlock
             return ['ok' => true];
     }
+}
+
+// Server timezone fixture: Asia/Colombo (+0530). Next run is the next occurrence of $time in that zone.
+function vault_mock_schedule(int $now, string $time = '01:30', bool $enabled = true): array
+{
+    $off = 19800;
+    [$h, $m] = array_map('intval', explode(':', $time));
+    $day = (int)floor(($now + $off) / 86400) * 86400;
+    $next = $day + $h * 3600 + $m * 60 - $off;
+    if ($next <= $now) { $next += 86400; }
+    return ['backup' => ['enabled' => $enabled, 'time' => $time], 'prune' => ['day' => 'sun', 'time' => '04:00'], 'check' => ['day' => 'wed', 'time' => '04:00'],
+        'timezone' => 'Asia/Colombo', 'utc_offset' => '+0530', 'now_epoch' => $now,
+        'next_run' => $enabled ? gmdate('Y-m-d\TH:i:s', $next + $off) . '+0530' : null, 'next_run_epoch' => $enabled ? $next : null];
 }

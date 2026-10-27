@@ -80,8 +80,11 @@ maint_prepare() { # needs --account or --all; takes the global lock exclusively
 }
 
 cmd_prune() {
+  local rc=0
   maint_prepare
-  maint_each prune forget --keep-daily "$KEEP_DAILY" --keep-weekly "$KEEP_WEEKLY" --keep-monthly "$KEEP_MONTHLY" --prune
+  maint_each prune forget --keep-daily "$KEEP_DAILY" --keep-weekly "$KEEP_WEEKLY" --keep-monthly "$KEEP_MONTHLY" --prune || rc=$?
+  if [[ $ARG_ALL == 1 ]]; then orphans_note; fi # report only; "vault orphans --purge" does the purge
+  return "$rc"
 }
 
 cmd_check() {
@@ -100,6 +103,7 @@ cmd_init() {
   local -a existing=() created=()
   # Two concurrent inits on one repo leave a config and two keys that don't match; serialise.
   lock_take "$VAULT_LOCK/vault.lock" x || die 3 "a backup or another maintenance run is active"
+  if [[ $IMMUTABLE == yes ]]; then imm_init_check; fi
   targets_resolve_all_init
   for a in "${TARGETS[@]}"; do
     if repo_ensure "$a"; then

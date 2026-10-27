@@ -13,6 +13,10 @@ const VAULT_BIN = '/usr/local/bin/vault';
 const VAULT_CRON = '/etc/cron.d/cwp-vault';
 const VAULT_RE_ACCOUNT = '/^[a-z][a-z0-9_]{0,31}$/';
 const VAULT_RE_SNAPSHOT = '/^[a-f0-9]{8,64}$/';
+const VAULT_RE_JOB = '/^[0-9]{8}T[0-9]{6}Z-[a-z][a-z0-9_]{0,31}$/';
+const VAULT_RE_MAILBOX = '/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}@[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/';
+const VAULT_RE_TIME = '/^([01][0-9]|2[0-3]):[0-5][0-9]$/';
+const VAULT_EXPORT_DIR = '/var/lib/cwp-vault/exports/';
 const VAULT_RE_DBANY = '/^[a-z][a-z0-9_]{0,31}_[A-Za-z0-9_]{1,56}$/';
 
 // CWP manages its own session; never start or write one here.
@@ -76,6 +80,8 @@ function vault_config_rules(): array
         'S3_CONNECTIONS' => $int(1, 64), 'LIMIT_UPLOAD_KIB' => $int(0, 100000000),
         'ALERT_EMAIL' => function ($v) { return $v === '' || (strlen($v) <= 254 && filter_var($v, FILTER_VALIDATE_EMAIL) && !preg_match('/[\s,;<>]/', $v)); },
         'ALERT_WEBHOOK' => 'vault_ok_url', 'HEARTBEAT_URL' => 'vault_ok_url',
+        'IMMUTABLE' => $yn, 'LOCK_DAYS' => $int(1, 3650),
+        'LOCK_MODE' => function ($v) { return $v === 'COMPLIANCE' || $v === 'GOVERNANCE'; },
     ];
 }
 
@@ -90,9 +96,12 @@ function vault_check_args(array $args): ?string
         'backup' => ['--account', '--all', '--dry-run', '--quiet'],
         'prune' => ['--account', '--all', '--quiet'], 'check' => ['--account', '--all', '--quiet'],
         'unlock' => ['--account', '--all'],
-        'restore' => ['--account', '--snapshot', '--what', '--path', '--db', '--target', '--target-db', '--dry-run', '--json', '--quiet'],
+        'restore' => ['--account', '--snapshot', '--what', '--path', '--db', '--target', '--target-db', '--mailbox', '--in-place', '--confirm', '--detach', '--dry-run', '--json', '--quiet'],
+        'jobs' => ['--json'], 'job' => ['--id', '--json'],
+        'export' => ['--account', '--snapshot', '--what', '--path', '--db', '--mailbox', '--encrypt', '--detach', '--json'],
+        'exports' => ['--json'], 'export-path' => ['--job'], 'audit-download' => ['--job'],
     ];
-    $bool = ['--json', '--all', '--dry-run', '--quiet'];
+    $bool = ['--json', '--all', '--dry-run', '--quiet', '--in-place', '--detach', '--encrypt'];
     $verb = $args[0] ?? '';
     foreach ($args as $a) { if (!is_string($a) || strpos($a, "\0") !== false) { return 'bad argument'; } }
 
@@ -107,6 +116,13 @@ function vault_check_args(array $args): ?string
             if (strlen($p[1]) > 1024 || preg_match('/[\r\n\0`]|\$\(/', $p[1]) || !call_user_func($rules[$p[0]], $p[1])) { return 'invalid value for ' . $p[0]; }
         }
         return null;
+    }
+    if ($verb === 'schedule') {
+        if ($args === ['schedule', 'get', '--json']) { return null; }
+        if (($args[1] ?? '') !== 'set' || ($args[2] ?? '') !== '--time' || !preg_match(VAULT_RE_TIME, (string)($args[3] ?? ''))) { return 'bad schedule verb'; }
+        $rest = array_slice($args, 4);
+        if ($rest === ['--json']) { return null; }
+        return ($rest === ['--enabled', 'yes', '--json'] || $rest === ['--enabled', 'no', '--json']) ? null : 'bad schedule verb';
     }
     if ($verb === 'secrets') {
         return ($args === ['secrets', 'set'] || $args === ['secrets', 'status', '--json']) ? null : 'bad secrets verb';
@@ -128,6 +144,9 @@ function vault_check_args(array $args): ?string
             case '--path': case '--target': $ok = vault_ok_path($v); break;
             case '--what': $ok = in_array($v, ['files', 'db', 'mail', 'meta'], true); break;
             case '--db': case '--target-db': $ok = (bool)preg_match(VAULT_RE_DBANY, $v); break;
+            case '--confirm': $ok = (bool)preg_match(VAULT_RE_ACCOUNT, $v); break;
+            case '--mailbox': $ok = strlen($v) <= 300 && preg_match(VAULT_RE_MAILBOX, $v); break;
+            case '--id': case '--job': $ok = (bool)preg_match(VAULT_RE_JOB, $v); break;
             case '--tail': $ok = ctype_digit($v) && (int)$v >= 1 && (int)$v <= 2000; break;
         }
         if (!$ok) { return 'invalid ' . $f; }
@@ -135,6 +154,24 @@ function vault_check_args(array $args): ?string
     }
     $acct = $seen['--account'][0] ?? null;
     if (in_array($verb, ['snapshots', 'ls', 'restore'], true) && $acct === null) { return 'account required'; }
+    if ($verb === 'job' && !isset($seen['--id'])) { return 'job id required'; }
+    if (in_array($verb, ['export-path', 'audit-download'], true) && !isset($seen['--job'])) { return 'job id required'; }
+    if ($verb === 'export') {
+        if ($acct === null || !isset($seen['--snapshot'])) { return 'account and snapshot required'; }
+        $w = $seen['--what'][0] ?? '';
+        if (!in_array($w, ['files', 'db', 'mail'], true)) { return 'downloads work for files, databases and mail'; }
+        if ($w === 'db' && !isset($seen['--db'])) { return 'database required'; }
+        if ($w === 'mail' && !isset($seen['--mailbox'])) { return 'mailbox required'; }
+        if ($w !== 'files' && isset($seen['--path'])) { return 'paths are only for files'; }
+    }
+    if (isset($seen['--in-place'])) {
+        // the engine checks these too; refusing here keeps a bad request from ever reaching it
+        if (($seen['--confirm'][0] ?? null) !== $acct) { return 'type the account name to confirm'; }
+        if (!isset($seen['--snapshot']) || $seen['--snapshot'][0] === 'latest') { return 'an in-place restore needs a snapshot id'; }
+        if (isset($seen['--target']) || isset($seen['--target-db'])) { return 'in-place takes no target'; }
+        if (!in_array($seen['--what'][0] ?? '', ['files', 'db', 'mail'], true)) { return 'in-place works for files, databases and mail'; }
+    } elseif (isset($seen['--confirm'])) { return '--confirm is only for in-place'; }
+    if (isset($seen['--mailbox']) && ($seen['--what'][0] ?? '') !== 'mail') { return 'mailbox is only for mail'; }
     foreach (['--db', '--target-db'] as $f) {
         foreach ($seen[$f] ?? [] as $db) { if (strpos($db, $acct . '_') !== 0) { return 'database does not belong to account'; } }
     }
@@ -257,13 +294,48 @@ function vault_log_lines($d): array
     return is_array($d) ? array_map('strval', array_slice(array_values($d), -2000)) : [];
 }
 
+function vault_dl_token(string $job): string { return hash_hmac('sha256', 'dl|' . $job, (string)$_SESSION['token']); }
+function vault_dl_url(string $job): string { return 'loader_ajax.php?ajax=cwp_vault&acc=download&job=' . rawurlencode($job) . '&t=' . vault_dl_token($job); }
+
+// GET download of a finished export: job id + HMAC token, path from the engine, must sit inside the exports dir.
+function vault_download(): void
+{
+    $job = vault_str('job', 'G');
+    if (!preg_match(VAULT_RE_JOB, $job) || !hash_equals(vault_dl_token($job), vault_str('t', 'G'))) { http_response_code(403); echo 'Invalid download link'; exit(); }
+    if (vault_mock()) {
+        while (ob_get_level() > 0) { ob_end_clean(); }
+        header('Content-Type: application/octet-stream'); header('Content-Disposition: attachment; filename="mock-export.txt"');
+        echo "CWP Vault demo download\n"; exit();
+    }
+    $r = vault_run(['export-path', '--job', $job]);
+    $path = is_string($r['data']) ? trim($r['data']) : '';
+    $real = $path !== '' ? realpath($path) : false;
+    if (!$r['ok'] || $real === false || strpos($real, VAULT_EXPORT_DIR) !== 0 || !is_file($real) || !is_readable($real)) { http_response_code(404); echo 'Download not found or expired'; exit(); }
+    $size = filesize($real);
+    $name = preg_replace('/[^A-Za-z0-9._-]/', '_', basename($real));
+    while (ob_get_level() > 0) { ob_end_clean(); }
+    @set_time_limit(0); ignore_user_abort(false);
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="' . $name . '"');
+    header('Content-Length: ' . $size);
+    header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff');
+    $fh = fopen($real, 'rb');
+    if (!$fh) { exit(); }
+    $sent = 0;
+    while (!feof($fh) && !connection_aborted()) { $buf = fread($fh, 1048576); if ($buf === false) { break; } echo $buf; $sent += strlen($buf); flush(); }
+    fclose($fh);
+    if ($sent === $size) { vault_run(['audit-download', '--job', $job]); }
+    exit();
+}
+
 function vault_dispatch(string $acc): void
 {
-    $writes = ['backup', 'restore', 'config_set', 'keys_save', 'test_storage', 'wizard_gen', 'wizard_commit', 'init'];
+    $writes = ['backup', 'restore', 'export', 'schedule_set', 'config_set', 'keys_save', 'test_storage', 'wizard_gen', 'wizard_commit', 'init'];
     if (in_array($acc, $writes, true)) {
         if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') { vault_out(false, null, 'POST required', 405); }
         if (!vault_csrf_ok()) { vault_out(false, null, 'Invalid or missing security token. Reload the page.', 403); }
     }
+    if ($acc === 'download') { vault_download(); }
     $account = vault_str('account', ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' ? 'P' : 'G');
     $acctOk = (bool)preg_match(VAULT_RE_ACCOUNT, $account);
 
@@ -292,7 +364,47 @@ function vault_dispatch(string $acc): void
             $r = vault_run(['log', '--tail', (string)$n]); if (!$r['ok']) { vault_fail($r); }
             vault_out(true, vault_log_lines($r['data']));
         case 'schedule':
-            vault_out(true, vault_schedule());
+            $r = vault_run(['schedule', 'get', '--json']);
+            if (is_array($r['data']) && !empty($r['data']['timezone'])) { vault_out(true, $r['data']); }
+            vault_out(true, vault_schedule()); // older engine: cron lines only
+
+        case 'schedule_set':
+            $t = vault_str('time'); $en = vault_str('enabled') === 'no' ? 'no' : 'yes';
+            if (!preg_match(VAULT_RE_TIME, $t)) { vault_out(false, null, 'Time must be HH:MM (24 hours)'); }
+            $r = vault_run(['schedule', 'set', '--time', $t, '--enabled', $en, '--json']);
+            if (!is_array($r['data'])) { vault_fail($r); }
+            vault_out(true, $r['data']);
+
+        case 'export':
+            if (!$acctOk) { vault_out(false, null, 'Invalid account'); }
+            $what = vault_str('what');
+            $a = ['export', '--account', $account, '--snapshot', vault_str('snapshot'), '--what', $what];
+            $paths = $_POST['paths'] ?? [];
+            if ($what === 'files' && is_array($paths)) {
+                foreach (array_slice($paths, 0, 200) as $p) { if (is_string($p)) { array_push($a, '--path', $p); } }
+            }
+            if ($what === 'db') { array_push($a, '--db', vault_str('db')); }
+            if ($what === 'mail') { array_push($a, '--mailbox', vault_str('mailbox')); }
+            $pw = null;
+            if (vault_str('encrypt') === '1') {
+                $pw = vault_str('password');
+                if ($pw !== vault_str('password2')) { vault_out(false, null, 'The two passwords do not match'); }
+                if (strlen($pw) < 12 || strlen($pw) > 256 || preg_match('/[\x00-\x1f]/', $pw)) { vault_out(false, null, 'Password must be 12 to 256 characters'); }
+                $a[] = '--encrypt';
+            }
+            array_push($a, '--detach', '--json');
+            session_write_close();
+            $r = vault_run($a, $pw === null ? null : $pw . "\n"); // password goes to STDIN only: never argv, never stored
+            $pw = null;
+            if (!is_array($r['data'])) { vault_out(false, null, $r['error'] ? substr($r['error'], 0, 200) : 'Could not start the download'); }
+            vault_out(true, $r['data']);
+
+        case 'exports':
+            $r = vault_run(['exports', '--json']); if (!is_array($r['data'])) { vault_fail($r); }
+            $list = isset($r['data']['exports']) ? $r['data']['exports'] : $r['data'];
+            foreach ($list as &$e) { if (is_array($e) && isset($e['job']) && preg_match(VAULT_RE_JOB, (string)$e['job'])) { $e['download'] = vault_dl_url($e['job']); } }
+            unset($e);
+            vault_out(true, $list);
 
         case 'backup':
             $a = ['backup'];
@@ -310,14 +422,27 @@ function vault_dispatch(string $acc): void
             if ($what === 'files' && is_array($paths)) {
                 foreach (array_slice($paths, 0, 200) as $p) { if (is_string($p)) { array_push($a, '--path', $p); } }
             }
-            if ($what === 'db') { array_push($a, '--db', vault_str('db'), '--target-db', vault_str('target_db')); }
+            if ($what === 'mail' && vault_str('mailbox') !== '') { array_push($a, '--mailbox', vault_str('mailbox')); }
+            if (vault_str('in_place') === '1') { array_push($a, '--in-place', '--confirm', vault_str('confirm')); }
+            elseif ($what === 'db') { array_push($a, '--db', vault_str('db'), '--target-db', vault_str('target_db')); }
             elseif (vault_str('target') !== '') { array_push($a, '--target', vault_str('target')); }
-            if (vault_str('dry_run') === '1') { $a[] = '--dry-run'; }
+            if ($what === 'db' && vault_str('in_place') === '1') { array_push($a, '--db', vault_str('db')); }
+            if (vault_str('dry_run') === '1') { $a[] = '--dry-run'; } else { $a[] = '--detach'; } // a real restore is a background job
             $a[] = '--json';
-            @set_time_limit(0); ignore_user_abort(true);
-            session_write_close(); // do not block other admin requests during a long restore
+            session_write_close();
             $r = vault_run($a);
             if (!is_array($r['data'])) { vault_fail($r); }
+            vault_out(true, $r['data']);
+
+        case 'job':
+            $id = vault_str('id', 'G');
+            if (!preg_match(VAULT_RE_JOB, $id)) { vault_out(false, null, 'Invalid job'); }
+            $r = vault_run(['job', '--id', $id, '--json']); if (!is_array($r['data'])) { vault_fail($r); }
+            $d = $r['data'];
+            if (($d['kind'] ?? '') === 'export' && ($d['state'] ?? '') === 'done' && !empty($d['ok'])) { $d['download'] = vault_dl_url($id); }
+            vault_out(true, $d);
+        case 'jobs':
+            $r = vault_run(['jobs', '--json']); if (!is_array($r['data'])) { vault_fail($r); }
             vault_out(true, $r['data']);
 
         case 'config_set':

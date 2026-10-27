@@ -8,8 +8,8 @@ teardown() { vault_teardown; }
   run vout status --json
   [ "$status" -eq 0 ]
   json_valid <<<"$output"
-  [ "$(printf '%s' "$output" | jget 'sorted(d.keys())')" = "['accounts', 'configured', 'running', 'server', 'version']" ]
-  [ "$(printf '%s' "$output" | jget 'd["version"]')" = 0.2.0 ]
+  [ "$(printf '%s' "$output" | jget 'sorted(d.keys())')" = "['accounts', 'configured', 'immutable', 'last_verify', 'now_epoch', 'running', 'schedule', 'server', 'version']" ]
+  [ "$(printf '%s' "$output" | jget 'd["version"]')" = 0.5.0 ]
   [ "$(printf '%s' "$output" | jget 'd["configured"]')" = True ]
   # every discovered account is listed; none has run yet
   [ "$(printf '%s' "$output" | jget 'all(a["result"] == "never" for a in d["accounts"])')" = True ]
