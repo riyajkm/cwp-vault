@@ -76,6 +76,8 @@ function vault_config_rules(): array
         'S3_CONNECTIONS' => $int(1, 64), 'LIMIT_UPLOAD_KIB' => $int(0, 100000000),
         'ALERT_EMAIL' => function ($v) { return $v === '' || (strlen($v) <= 254 && filter_var($v, FILTER_VALIDATE_EMAIL) && !preg_match('/[\s,;<>]/', $v)); },
         'ALERT_WEBHOOK' => 'vault_ok_url', 'HEARTBEAT_URL' => 'vault_ok_url',
+        'IMMUTABLE' => $yn, 'LOCK_DAYS' => $int(1, 3650),
+        'LOCK_MODE' => function ($v) { return $v === 'COMPLIANCE' || $v === 'GOVERNANCE'; },
     ];
 }
 

@@ -23,7 +23,7 @@ function vault_mock_data(array $a)
                     $mk('carol', 'ok', 5 * 3600, 95, 20481234, 9),
                 ],
                 'server' => $mk('_server', 'ok', 5 * 3600 + 500, 33, 3123456, 7),
-                'running' => []];
+                'running' => [], 'immutable' => ['enabled' => true, 'mode' => 'COMPLIANCE', 'days' => 14]];
         case 'snapshots':
             if (!$acct) { return ['error' => 'account required', 'code' => 2]; }
             $out = [];
@@ -64,7 +64,7 @@ function vault_mock_data(array $a)
                 'BACKUP_MAIL' => 'yes', 'BACKUP_DATABASES' => 'yes', 'BACKUP_SERVER' => 'yes',
                 'KEEP_DAILY' => '7', 'KEEP_WEEKLY' => '4', 'KEEP_MONTHLY' => '3',
                 'S3_CONNECTIONS' => '4', 'LIMIT_UPLOAD_KIB' => '0',
-                'ALERT_EMAIL' => 'admin@example.com', 'ALERT_WEBHOOK' => '', 'HEARTBEAT_URL' => ''];
+                'ALERT_EMAIL' => 'admin@example.com', 'ALERT_WEBHOOK' => '', 'HEARTBEAT_URL' => '', 'IMMUTABLE' => 'yes', 'LOCK_MODE' => 'COMPLIANCE', 'LOCK_DAYS' => '14'];
         case 'secrets':
             if (($a[1] ?? '') === 'set') { return ['ok' => true]; }
             return ['s3_key_set' => true, 'access_key_hint' => '…ABCD', 'password_set' => true];
