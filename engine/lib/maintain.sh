@@ -100,6 +100,7 @@ cmd_init() {
   local -a existing=() created=()
   # Two concurrent inits on one repo leave a config and two keys that don't match; serialise.
   lock_take "$VAULT_LOCK/vault.lock" x || die 3 "a backup or another maintenance run is active"
+  if [[ $IMMUTABLE == yes ]]; then imm_init_check; fi
   targets_resolve_all_init
   for a in "${TARGETS[@]}"; do
     if repo_ensure "$a"; then
