@@ -1,0 +1,21 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# Logs, secrets, local config
+*.log
+.env*
+secrets*
+vault.conf
+!vault.conf.example
+
+# Scratch
+/tmp/
+release-notes.md
