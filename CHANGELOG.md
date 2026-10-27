@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Admin module: redesigned dashboard (health strip, four stat cards, per-account cards with status pills, running jobs) with a live
+  countdown to the next backup; the backup time is editable in Settings (server time, with a live conversion to the browser time zone);
+  downloads of files, a database or a mailbox from the Restore tab, unencrypted or GPG-encrypted with a password sent over STDIN, served
+  through a signed, audited download link, plus a Recent downloads list.
 - Restore v2: `vault restore --detach` runs a restore as a background job (`vault jobs`, `vault job --id`, progress and
   result in `var/status/restore-<job>.json`); `--in-place --confirm <account>` restores files, a database or one mailbox
   (`--mailbox user@domain`) into the live account after a fresh safety backup, with symlink and ownership guards.
