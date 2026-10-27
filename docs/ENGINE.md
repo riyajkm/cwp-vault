@@ -110,6 +110,29 @@ databases restore into `--target-db` (required; refuses an existing non-empty DB
 0  4 * * 3  root /usr/local/bin/vault check --all
 ```
 
+## Admin module ↔ engine contract
+
+The CWP admin module (PHP, runs as root under cwpsrv) talks to the engine **only** by running
+`/usr/local/bin/vault` with `proc_open()` and an **argument array** (no shell), from a fixed verb allowlist.
+Every read command supports `--json` and prints one JSON document to stdout; errors print
+`{"error":"…","code":N}` with the matching exit code.
+
+| Command | JSON output |
+|---|---|
+| `vault status --json` | `{"version":"x.y.z","configured":bool,"accounts":[{"account","result","started","finished","duration_s","bytes_added","snapshots":n,"error"}],"server":{…same…},"running":[{"account","command","pid","started"}]}` |
+| `vault snapshots --account U --json` | `[{"id","short_id","time","tags":[],"paths":[],"kind":"files|db|meta","db":null|"name","size":n|null}]` |
+| `vault ls --account U --snapshot ID [--path P] --json` | one directory level: `[{"name","type":"dir|file|symlink","size","mtime","path"}]` |
+| `vault config get --json` | all non-secret keys with current values |
+| `vault config set KEY=VALUE …` | validates every pair first, then writes `vault.conf` atomically; `{"ok":true,"changed":[…]}` |
+| `vault secrets set` | reads `KEY=VALUE` lines from **stdin** (never argv): `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `RESTIC_PASSWORD` (refused if repos already exist with another password) |
+| `vault secrets status --json` | `{"s3_key_set":bool,"access_key_hint":"…abcd","password_set":bool}` — never the values |
+| `vault log --tail N [--json]` | last N log lines (secrets already filtered) |
+| `vault test-storage --json` | `{"ok":bool,"write_ms","read_ms","delete_ms","error"}` |
+| `vault restore … --json` | `{"ok","job","target","files","bytes","duration_s","error"}`; also written to `var/status/restore-<job>.json` |
+
+Long-running verbs (`backup`, `restore`, `prune`, `check`) are started by the module detached:
+`setsid -f /usr/local/bin/vault <verb> … --quiet`; the module then polls `status --json` / `log --tail`.
+
 ## Security rules (from the v0.2 threat review)
 
 What v0.2 protects against: disk loss, accidental deletion, a compromised customer account,
