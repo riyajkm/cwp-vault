@@ -38,7 +38,11 @@ case $sub in
       printf '{"Versions":[{"Key":"%sdata/00/aa","VersionId":"v0","IsLatest":false}],"DeleteMarkers":[' "$prefix"
       printf '{"Key":"%sdata/00/aa","VersionId":"m1","IsLatest":true,"LastModified":"2026-10-27T10:00:00+00:00"},' "$prefix"
       printf '{"Key":"%slocks/bb","VersionId":"m2","IsLatest":true,"LastModified":"2026-10-28T02:00:00+00:00"},' "$prefix"
-      printf '{"Key":"%ssnapshots/cc","VersionId":"m3","IsLatest":true,"LastModified":"2026-10-28T03:00:00+00:00"}]}\n' "$prefix"
+      printf '{"Key":"%ssnapshots/cc","VersionId":"m3","IsLatest":true,"LastModified":"2026-10-28T03:00:00+00:00"}' "$prefix"
+      for ((i = 1; i <= ${STUB_MARKERS:-0}; i++)); do
+        printf ',{"Key":"%sdata/%04d","VersionId":"x%d","IsLatest":true,"LastModified":"2026-10-28T04:00:00+00:00"}' "$prefix" "$i" "$i"
+      done
+      printf ']}\n'
     else
       echo '{"Versions":[],"DeleteMarkers":[]}'
     fi ;;
