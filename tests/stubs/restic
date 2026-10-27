@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # test stub: literal text and fixture vars are intentional
 # Test stub for restic. Logs "<repo> | <argv>" to $STUB_LOG/restic.log and saves --stdin data.
 # Knobs (env): STUB_NOREPO=1 (cat config -> 10), STUB_CAT_RC=N (cat config -> N),
 # STUB_FAIL_FILES=1 (file backup fails, leaks secrets on stderr), STUB_STREAM_FAIL="<stdin-filename> ..."

@@ -11,7 +11,8 @@ teardown() { vault_teardown; }
   [ "$(printf '%s' "$output" | jget 'sorted(d.keys())')" = "['accounts', 'configured', 'running', 'server', 'version']" ]
   [ "$(printf '%s' "$output" | jget 'd["version"]')" = 0.2.0 ]
   [ "$(printf '%s' "$output" | jget 'd["configured"]')" = True ]
-  [ "$(printf '%s' "$output" | jget 'd["accounts"]')" = "[]" ]
+  # every discovered account is listed; none has run yet
+  [ "$(printf '%s' "$output" | jget 'all(a["result"] == "never" for a in d["accounts"])')" = True ]
   [ "$(printf '%s' "$output" | jget 'd["server"]')" = None ]
   [ "$(printf '%s' "$output" | jget 'd["running"]')" = "[]" ]
 }

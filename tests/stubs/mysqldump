@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # test stub: literal text and fixture vars are intentional
 # Test stub for mysqldump. Emits DEFINER clauses so tests can prove the engine strips them.
 # Knob: STUB_DUMP_FAIL="db1 db2" -> partial output, then exit 2.
 mkdir -p "$STUB_LOG"

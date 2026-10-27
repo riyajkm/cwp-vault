@@ -92,7 +92,7 @@ no_restore_call() { ! grep -q ' restore ' "$STUB_LOG/restic.log" 2>/dev/null; }
   run vault restore --account alice --what files
   [ "$status" -eq 0 ]
   run vout status --json
-  [ "$(printf '%s' "$output" | jget 'len(d["accounts"])')" -eq 0 ]
+  [ "$(printf '%s' "$output" | jget '[a["account"] for a in d["accounts"] if a["account"].startswith("restore")]')" = "[]" ]
 }
 
 @test "restore goes to restic with the tag, snapshot, target and include" {
