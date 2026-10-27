@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-28
+
 ### Added
 
 - Engine (`vault` CLI): per-account restic repositories on S3-compatible storage; backup of home files,
@@ -40,5 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project roadmap and workflow documents.
 - Repository scaffolding: license, contributing guide, security policy, issue and PR templates, CI.
 
-[Unreleased]: https://github.com/riyajkm/cwp-vault/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/riyajkm/cwp-vault/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/riyajkm/cwp-vault/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/riyajkm/cwp-vault/releases/tag/v0.1.0
