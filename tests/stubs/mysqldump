@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Test stub for mysqldump. Emits DEFINER clauses so tests can prove the engine strips them.
+# Knob: STUB_DUMP_FAIL="db1 db2" -> partial output, then exit 2.
+mkdir -p "$STUB_LOG"
+printf '%s\n' "$*" >>"$STUB_LOG/mysqldump.log"
+db=${!#}
+echo "-- dump of $db"
+echo 'CREATE TABLE t (id int);'
+echo '/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET NEW.id=1 */;;'
+echo 'CREATE DEFINER=`wpuser`@`%` PROCEDURE p() BEGIN END;'
+for f in ${STUB_DUMP_FAIL:-}; do
+  if [[ $f == "$db" ]]; then echo "mysqldump: Got error: 2013 lost connection" >&2; exit 2; fi
+done
+exit 0

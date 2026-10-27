@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+mkdir -p "$STUB_LOG"
+printf '%s\n' "$*" >>"$STUB_LOG/curl.log"
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case ${args[i]} in
+    --config) printf 'CONFIG %s\n' "$(cat "${args[i + 1]}")" >>"$STUB_LOG/curl.log" ;;
+    --data-binary) printf 'DATA %s\n' "${args[i + 1]}" >>"$STUB_LOG/curl.log" ;;
+  esac
+done
+exit 0

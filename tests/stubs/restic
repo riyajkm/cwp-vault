@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Test stub for restic. Logs "<repo> | <argv>" to $STUB_LOG/restic.log and saves --stdin data.
+# Knobs (env): STUB_NOREPO=1 (cat config -> 10), STUB_CAT_RC=N (cat config -> N),
+# STUB_FAIL_FILES=1 (file backup fails, leaks secrets on stderr), STUB_STREAM_FAIL="<stdin-filename> ..."
+mkdir -p "$STUB_LOG/stdin"
+printf '%s | %s\n' "${RESTIC_REPOSITORY:-}" "$*" >>"$STUB_LOG/restic.log"
+printf 'pw_in_env=%s key_in_env=%s\n' "${RESTIC_PASSWORD:+yes}" "${AWS_ACCESS_KEY_ID:+yes}" >>"$STUB_LOG/restic.env.log"
+args=("$@")
+sub='' fname='' stdin=0 target='' i=0
+while ((i < ${#args[@]})); do
+  a=${args[i]}
+  case $a in
+    -o | --limit-upload) i=$((i + 2)); continue ;;
+    --stdin) stdin=1 ;;
+    --stdin-filename) fname=${args[i + 1]} ;;
+    --target) target=${args[i + 1]} ;;
+    -*) ;;
+    *) [[ -n $sub ]] || sub=$a ;;
+  esac
+  i=$((i + 1))
+done
+n=$(($(cat "$STUB_LOG/restic.count" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$STUB_LOG/restic.count"
+case $sub in
+  cat)
+    if [[ -n ${STUB_NOREPO:-} ]]; then echo "Fatal: repository does not exist" >&2; exit 10; fi
+    if [[ -n ${STUB_CAT_RC:-} ]]; then echo "Fatal: cannot open repository" >&2; exit "$STUB_CAT_RC"; fi
+    exit 0 ;;
+  backup)
+    if ((stdin)); then
+      cat >"$STUB_LOG/stdin/${fname//\//_}"
+      cp "$STUB_LOG/stdin/${fname//\//_}" "$STUB_LOG/last_stdin"
+      for f in ${STUB_STREAM_FAIL:-}; do
+        if [[ $f == "$fname" ]]; then echo "Fatal: upload failed" >&2; exit 1; fi
+      done
+    elif [[ -n ${STUB_FAIL_FILES:-} ]]; then
+      echo "Fatal: unable to open /home/alice/secret-file" >&2
+      echo "Fatal: bad credential $AWS_SECRET_ACCESS_KEY rejected" >&2
+      echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY RESTIC_PASSWORD=$RESTIC_PASSWORD" >&2
+      exit 1
+    fi
+    printf '{"message_type":"status","percent_done":0.5}\n'
+    printf '{"message_type":"summary","snapshot_id":"deadbeef%02d","files_new":2,"files_changed":1,"data_added":100}\n' "$n" ;;
+  restore)
+    if [[ -n ${STUB_RESTORE_FAIL:-} ]]; then echo "Fatal: restore failed" >&2; exit 1; fi
+    mkdir -p "$target"
+    echo data >"$target/restored.txt"
+    echo data >"$target/suid.bin"
+    chmod 4755 "$target/suid.bin" 2>/dev/null || true ;;
+  dump)
+    if [[ ${args[*]} == */probe/probe.txt* ]]; then cat "$STUB_LOG/last_stdin"; exit 0; fi
+    printf 'CREATE TABLE t (id int);\nCREATE DEFINER=`root`@`localhost` PROCEDURE p() BEGIN END;\n' ;;
+  snapshots)
+    cat <<'JSON'
+[{"id":"aaaaaaaa11112222333344445555666677778888999900001111222233334444","short_id":"aaaaaaaa","time":"2026-01-01T01:30:00Z","tags":["files","alice"],"paths":["/home/alice"],"summary":{"total_bytes_processed":1000}},
+ {"id":"bbbbbbbb11112222333344445555666677778888999900001111222233334444","short_id":"bbbbbbbb","time":"2026-01-01T01:31:00Z","tags":["db","alice","db:alice_wp"],"paths":[],"summary":null},
+ {"id":"cccccccc11112222333344445555666677778888999900001111222233334444","short_id":"cccccccc","time":"2026-01-01T01:32:00Z","tags":["meta","alice"],"paths":["/meta/account.json"]}]
+JSON
+    ;;
+  ls)
+    cat <<'JSON'
+{"message_type":"snapshot","id":"aaaaaaaa"}
+{"name":"alice","type":"dir","path":"/home/alice","mtime":"2026-01-01T00:00:00Z"}
+{"name":"index.php","type":"file","path":"/home/alice/index.php","size":12,"mtime":"2026-01-01T00:00:00Z"}
+{"name":"deep.txt","type":"file","path":"/home/alice/sub/deep.txt","size":3,"mtime":"2026-01-01T00:00:00Z"}
+JSON
+    ;;
+  *) ;;
+esac
+exit 0
