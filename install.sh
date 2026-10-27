@@ -192,7 +192,8 @@ umask 022
 MODE=add QUIET=0
 COPY=/usr/local/cwp-vault/module-copy
 RES=/usr/local/cwpsrv/htdocs/resources/admin
-LOCKDIRS=(/usr/local/cwpsrv/htdocs/admin "$RES")
+# Only the tree the module is written into. CWP's own htdocs/admin is never touched.
+LOCKDIRS=("$RES")
 MENU=$RES/include/3rdparty.php
 MARK='module=cwp_vault'
 RELOCK=()
@@ -220,7 +221,8 @@ is_immutable() {
 relock() {
   local d
   for d in ${RELOCK[@]+"${RELOCK[@]}"}; do
-    chattr -R +i -- "$d" || echo "fix-menu: could not restore the immutable flag on $d" >&2
+    # chattr can't set flags on symlinks (CWP has some), so skip them instead of failing.
+    find "$d" -xdev ! -type l -exec chattr +i -- {} + || echo "fix-menu: could not restore the immutable flag on $d" >&2
   done
   RELOCK=()
 }
@@ -231,7 +233,7 @@ trap 'exit 130' INT TERM
 for d in "${LOCKDIRS[@]}"; do
   if [[ -d $d ]] && is_immutable "$d"; then
     RELOCK+=("$d")
-    chattr -R -i -- "$d"
+    find "$d" -xdev ! -type l -exec chattr -i -- {} +
   fi
 done
 
